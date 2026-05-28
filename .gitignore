@@ -1,0 +1,35 @@
+# Dependencies
+node_modules/
+extensions/*/node_modules/
+
+# Build output
+dist/
+
+# Neutralino binaries (downloaded during setup)
+bin/
+
+# Local storage
+.storage/
+
+# Logs
+*.log
+neutralinojs.log
+
+# Temp files
+.tmp/
+
+# OS files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Environment
+.env
+.env.local

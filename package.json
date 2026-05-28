@@ -1,0 +1,32 @@
+{
+  "name": "ripple-ssh",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "prepare": "node scripts/prepare-frontend.js",
+    "dev": "pnpm prepare && neu run",
+    "build": "pnpm prepare && neu build",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devEngines": {
+    "packageManager": {
+      "name": "pnpm",
+      "version": "^11.2.2",
+      "onFail": "download"
+    }
+  },
+  "type": "module",
+  "devDependencies": {
+    "@neutralinojs/neu": "^11.7.1"
+  },
+  "dependencies": {
+    "ssh2": "^1.17.0",
+    "ws": "^8.21.0",
+    "xterm": "^5.3.0",
+    "xterm-addon-fit": "^0.8.0"
+  }
+}

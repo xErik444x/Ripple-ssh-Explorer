@@ -1,0 +1,8 @@
+packages:
+  - "."
+
+allowBuilds:
+  ssh2: true
+  cpu-features: true
+  utf-8-validate: true
+  bufferutil: true
