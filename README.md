@@ -28,7 +28,11 @@ Lightweight, fast, and beautiful desktop SSH client with a built-in terminal, fi
 
 ## 📸 Screenshots
 
-> _Screenshots coming soon_
+**Connection Setup**
+![Connection Setup](https://i.imgur.com/nH29sXx.png)
+
+**Connected — Terminal + File Explorer**
+![Connected](https://i.imgur.com/s3rdVio.png)
 
 ## 🚀 Getting Started
 
