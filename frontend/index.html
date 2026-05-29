@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <!-- Ripple SSH — Made with ❤️ by Erik Schwerdt -->
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ripple SSH</title>
+  <link rel="stylesheet" href="./src/xterm.css">
+  <link rel="stylesheet" href="./src/style.css">
+  <link rel="stylesheet" href="./src/fonts/fonts.css">
+</head>
+<body>
+  
+  <div class="app-container">
+    
+    <!-- Left Sidebar -->
+    <aside class="sidebar" id="sidebar">
+      
+      <div class="sidebar-header">
+        <div class="logo">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+          <span>RIPPLE SSH</span>
+        </div>
+        <div class="app-version">v1.0.0</div>
+      </div>
+
+      <div class="sidebar-pane" id="profiles-pane">
+        <div class="section-title">
+          <span>Saved Connections</span>
+          <button id="btn-new-profile" title="New Connection" class="btn-icon" aria-label="New Connection">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+          </button>
+        </div>
+        <div class="profile-list" id="profile-list">
+          <div class="empty-state">No saved profiles</div>
+        </div>
+      </div>
+
+      <div class="sidebar-pane hidden" id="sftp-pane">
+        <div class="section-title">
+          <span>Remote Files</span>
+          <div class="sftp-actions-top">
+            <button id="sftp-btn-mkdir" title="New Directory" class="btn-icon" aria-label="New Directory">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path><line x1="12" y1="11" x2="12" y2="17"></line><line x1="9" y1="14" x2="15" y2="14"></line></svg>
+            </button>
+            <button id="sftp-btn-upload" title="Upload File" class="btn-icon" aria-label="Upload File">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+            </button>
+            <button id="sftp-btn-refresh" title="Refresh Directory" class="btn-icon" aria-label="Refresh Directory">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+            </button>
+          </div>
+        </div>
+
+        <div class="breadcrumbs-container">
+          <button id="sftp-btn-up" class="btn-icon-sm" title="Up One Level" aria-label="Up One Level">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg>
+          </button>
+          <div class="breadcrumbs" id="sftp-breadcrumbs">/</div>
+        </div>
+
+        <div class="filter-container">
+          <input type="text" id="sftp-filter" placeholder="Filter files..." aria-label="Filter files">
+        </div>
+
+        <div class="file-list-wrapper">
+          <div class="file-list-header">
+            <div class="col-name">Name</div>
+            <div class="col-size">Size</div>
+          </div>
+          <div class="file-list" id="sftp-file-list">
+            <div class="loading-state">Loading directory...</div>
+          </div>
+        </div>
+
+        <div class="transfer-status hidden" id="transfer-panel" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">
+          <div class="transfer-header">
+            <span class="transfer-title" id="transfer-title">Uploading file...</span>
+            <span class="transfer-percent" id="transfer-percent">0%</span>
+          </div>
+          <div class="progress-bar-container">
+            <div class="progress-bar-fill" id="transfer-progress" style="width: 0%"></div>
+          </div>
+          <div class="transfer-meta" id="transfer-meta">0 KB / 0 KB</div>
+        </div>
+        <div class="sidebar-footer">
+          Made with ❤️ by <a href="https://github.com/xErik444x" target="_blank">Erik Schwerdt</a>
+        </div>
+      </div>
+
+    </aside>
+
+    <main class="main-content">
+      
+      <header class="top-header" id="top-header">
+        <div class="header-status">
+          <div class="status-indicator disconnected" id="status-dot"></div>
+          <span class="status-text" id="status-text">Disconnected</span>
+        </div>
+        <div class="header-actions">
+          <button id="btn-disconnect" class="btn btn-danger hidden">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"></path><line x1="12" y1="2" x2="12" y2="12"></line></svg>
+            Disconnect
+          </button>
+          <button id="btn-settings" class="btn btn-secondary hidden" title="Terminal Settings" aria-label="Terminal Settings">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+            Settings
+          </button>
+        </div>
+      </header>
+
+      <section class="panel-form" id="config-panel">
+        <div class="form-container">
+          <h1 class="form-title" id="form-heading">Establish Connection</h1>
+          <p class="form-subtitle">Enter details to initiate remote SSH & SFTP session</p>
+          
+          <form id="ssh-form">
+            <input type="hidden" id="profile-id">
+
+            <div class="form-group-row">
+              <div class="form-group flex-3">
+                <label for="ssh-host">Host Address</label>
+                <input type="text" id="ssh-host" placeholder="e.g. 192.168.1.10 or example.com" required>
+              </div>
+              <div class="form-group flex-1">
+                <label for="ssh-port">Port</label>
+                <input type="number" id="ssh-port" value="22" placeholder="22" min="1" max="65535" required>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label for="ssh-username">Username</label>
+              <input type="text" id="ssh-username" placeholder="e.g. root or ubuntu" required>
+            </div>
+
+            <div class="auth-toggle-container">
+              <div class="auth-toggle-label">Authentication Method</div>
+              <div class="auth-toggle-buttons">
+                <button type="button" class="auth-btn active" id="auth-btn-pwd" data-target="password">Password</button>
+                <button type="button" class="auth-btn" id="auth-btn-key" data-target="key">Private Key</button>
+              </div>
+            </div>
+
+            <div class="form-group auth-field" id="auth-password-group">
+              <label for="ssh-password">Password</label>
+               <input type="password" id="ssh-password" placeholder="Enter remote SSH password" autocomplete="off">
+            </div>
+
+            <div class="auth-field hidden" id="auth-key-group">
+              <div class="form-group">
+                <label for="ssh-key-path">Private Key File Path (Optional)</label>
+                <div class="file-input-wrapper">
+                  <input type="text" id="ssh-key-path" placeholder="C:\Users\username\.ssh\id_rsa">
+                  <button type="button" id="btn-browse-key" class="btn btn-secondary btn-sm">Browse</button>
+                </div>
+              </div>
+              <div class="form-group">
+                <label for="ssh-key-text">Or Paste Private Key Text</label>
+                <textarea id="ssh-key-text" placeholder="-----BEGIN OPENSSH PRIVATE KEY-----\n..." rows="4"></textarea>
+              </div>
+              <div class="form-group">
+                <label for="ssh-passphrase">Key Passphrase (If encrypted)</label>
+                <input type="password" id="ssh-passphrase" placeholder="Passphrase for private key" autocomplete="off">
+              </div>
+            </div>
+
+            <div class="divider"></div>
+
+            <div class="form-group">
+              <label for="profile-name">Save Connection As (Profile Name)</label>
+              <input type="text" id="profile-name" placeholder="e.g. Production Webserver (Leave blank to not save)">
+            </div>
+
+            <div class="form-actions">
+              <button type="button" id="btn-save-profile" class="btn btn-secondary">Save Profile Only</button>
+              <button type="submit" id="btn-connect" class="btn btn-primary">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path><polyline points="10 17 15 12 10 7"></polyline><line x1="15" y1="12" x2="3" y2="12"></line></svg>
+                Connect Now
+              </button>
+            </div>
+          </form>
+        </div>
+      </section>
+
+      <section class="panel-terminal hidden" id="terminal-panel">
+        <div id="terminal-container"></div>
+      </section>
+
+    </main>
+  </div>
+
+  <dialog id="dialog-mkdir" class="modal">
+    <form method="dialog" id="form-mkdir">
+      <h3>Create New Directory</h3>
+      <div class="form-group">
+        <label for="mkdir-name">Directory Name</label>
+        <input type="text" id="mkdir-name" placeholder="new_folder" required>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-secondary" onclick="document.getElementById('dialog-mkdir').close()">Cancel</button>
+        <button type="submit" class="btn btn-primary">Create</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="dialog-rename" class="modal">
+    <form method="dialog" id="form-rename">
+      <h3>Rename File/Directory</h3>
+      <input type="hidden" id="rename-original-path">
+      <div class="form-group">
+        <label for="rename-new-name">New Name</label>
+        <input type="text" id="rename-new-name" placeholder="" required>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-secondary" onclick="document.getElementById('dialog-rename').close()">Cancel</button>
+        <button type="submit" class="btn btn-primary">Rename</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="dialog-preview" class="modal modal-preview" aria-labelledby="preview-title">
+    <div class="preview-header">
+      <div class="preview-header-info">
+        <h3 id="preview-title">Preview</h3>
+        <div class="preview-meta">
+          <span id="preview-type">Type: -</span>
+          <span id="preview-size">Size: -</span>
+        </div>
+      </div>
+      <div class="preview-header-actions">
+        <button id="btn-preview-download" class="btn-icon-sm" title="Save As...">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+        </button>
+        <button id="btn-preview-close" class="btn-icon-sm" title="Close">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+        </button>
+      </div>
+    </div>
+    <div class="preview-body">
+      <div id="preview-loading-container" style="display:none">
+        <div class="preview-loading-spinner"></div>
+        <div class="preview-loading-text">Downloading preview...</div>
+        <div class="preview-loading-meta" id="preview-loading-meta"></div>
+        <div class="progress-bar-container preview-progress">
+          <div class="progress-bar-fill" id="preview-progress-bar" style="width: 0%"></div>
+        </div>
+        <div class="preview-loading-percent" id="preview-loading-percent">0%</div>
+      </div>
+      <div id="preview-image-container" class="hidden">
+        <img id="preview-image" alt="">
+      </div>
+      <div id="preview-text-container" class="hidden">
+        <pre id="preview-text"></pre>
+      </div>
+      <div id="preview-pdf-container" class="hidden">
+        <iframe id="preview-pdf" type="application/pdf" title="PDF Preview"></iframe>
+      </div>
+      <div id="preview-video-container" class="hidden">
+        <video id="preview-video" controls></video>
+      </div>
+      <div id="preview-audio-container" class="hidden">
+        <audio id="preview-audio" controls></audio>
+      </div>
+      <div id="preview-unsupported-container" class="hidden">
+        <div class="preview-unsupported-icon">
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path><polyline points="13 2 13 9 20 9"></polyline></svg>
+        </div>
+        <p class="preview-unsupported-message">This file type cannot be previewed.</p>
+        <button id="btn-preview-open-external" class="btn btn-secondary">Open with Default App</button>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog id="dialog-settings" class="modal" aria-labelledby="settings-title">
+    <form method="dialog" id="form-settings">
+      <h3 id="settings-title">Terminal Settings</h3>
+      <div class="form-group">
+        <label for="settings-font-size">Font Size: <span id="settings-font-size-val">14</span>px</label>
+        <input type="range" id="settings-font-size" min="10" max="24" value="14" step="1">
+      </div>
+      <div class="form-group">
+        <label for="settings-line-height">Line Height: <span id="settings-line-height-val">1.5</span></label>
+        <input type="range" id="settings-line-height" min="1.0" max="2.0" value="1.5" step="0.1">
+      </div>
+      <div class="form-group">
+        <label for="settings-font-family">Font Family</label>
+        <select id="settings-font-family">
+          <option value="Fira Code">Fira Code</option>
+          <option value="Cascadia Code">Cascadia Code</option>
+          <option value="JetBrains Mono">JetBrains Mono</option>
+          <option value="Consolas">Consolas</option>
+          <option value="monospace">System Monospace</option>
+        </select>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-secondary" onclick="document.getElementById('dialog-settings').close()">Cancel</button>
+        <button type="submit" class="btn btn-primary">Apply</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div class="context-menu" id="terminal-context-menu" role="menu">
+    <ul>
+      <li id="ctx-term-copy" role="menuitem">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+        <span>Copy</span>
+      </li>
+      <li id="ctx-term-paste" role="menuitem">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path><rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect></svg>
+        <span>Paste</span>
+      </li>
+    </ul>
+  </div>
+
+  <div class="context-menu" id="file-context-menu" role="menu">
+    <ul>
+      <li id="ctx-preview" role="menuitem">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+        <span>Preview</span>
+      </li>
+      <li id="ctx-download" role="menuitem">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+        <span>Download File</span>
+      </li>
+      <li id="ctx-rename" role="menuitem">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>
+        <span>Rename</span>
+      </li>
+      <li class="danger" id="ctx-delete" role="menuitem">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
+        <span>Delete</span>
+      </li>
+    </ul>
+  </div>
+
+  <script type="module" src="./wailsjs/go/main/App.js"></script>
+  <script type="module" src="./wailsjs/runtime/runtime.js"></script>
+  <script src="/xterm.js"></script>
+  <script src="/xterm-addon-fit.js"></script>
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>
