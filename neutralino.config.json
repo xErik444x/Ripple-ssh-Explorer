@@ -1,6 +1,6 @@
 {
   "$schema": "https://raw.githubusercontent.com/neutralinojs/neutralinojs/main/schemas/neutralino.config.schema.json",
-  "applicationId": "js.neutralino.sshconnector",
+  "applicationId": "js.ripple.ssh",
   "version": "1.0.0",
   "defaultMode": "window",
   "port": 0,
@@ -25,7 +25,7 @@
   "enableExtensions": true,
   "extensions": [
     {
-      "id": "js.neutralino.sshconnector",
+      "id": "js.ripple.ssh",
       "command": "node ${NL_PATH}/extensions/ssh-connector/main.js"
     }
   ],

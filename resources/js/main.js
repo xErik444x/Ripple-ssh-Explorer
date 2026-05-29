@@ -2,17 +2,95 @@
 
 let profiles = [];
 let currentPath = '/';
-let parentPath = '/';
 let isConnected = false;
 let terminal = null;
 let fitAddon = null;
-let extensionId = 'js.neutralino.sshconnector';
+let extensionId = 'js.ripple.ssh';
+
+// Persistent config directory (OS-standard location, independent of exe path)
+let appConfigDir = null;
+
+function escapeHtml(str) {
+  const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' };
+  return String(str).replace(/[&<>"']/g, c => map[c]);
+}
+
+// Read a config file from the OS config directory
+async function readConfig(key) {
+  if (!appConfigDir) return null;
+  try {
+    const raw = await Neutralino.filesystem.readFile(appConfigDir + '/' + key + '.json');
+    return JSON.parse(raw);
+  } catch (e) {
+    return null;
+  }
+}
+
+// Write a config file to the OS config directory
+async function writeConfig(key, data) {
+  if (!appConfigDir) return;
+  try {
+    await Neutralino.filesystem.writeFile(
+      appConfigDir + '/' + key + '.json',
+      JSON.stringify(data, null, 2)
+    );
+  } catch (e) { /* ignore */ }
+}
+
+// Initialize config directory and migrate from old Neutralino.storage
+async function initConfigDir() {
+  const configRoot = await Neutralino.os.getPath('config');
+  const sep = window.NL_OS === 'Windows' ? '\\' : '/';
+  appConfigDir = configRoot + sep + 'ripple-ssh';
+  try {
+    await Neutralino.filesystem.createDirectory(appConfigDir);
+  } catch (e) { /* already exists */ }
+
+  // Migrate from old Neutralino.storage if first run
+  try {
+    const oldProfiles = await Neutralino.storage.getData('ssh_profiles');
+    if (oldProfiles) {
+      await writeConfig('ssh_profiles', JSON.parse(oldProfiles));
+      await Neutralino.storage.removeData('ssh_profiles');
+    }
+  } catch (e) { /* no old data */ }
+  try {
+    const oldSettings = await Neutralino.storage.getData('terminal_settings');
+    if (oldSettings) {
+      await writeConfig('terminal_settings', JSON.parse(oldSettings));
+      await Neutralino.storage.removeData('terminal_settings');
+    }
+  } catch (e) { /* no old data */ }
+}
+
+function showToast(message, type = 'info', duration = 4000) {
+  let container = document.getElementById('toast-container');
+  if (!container) {
+    container = document.createElement('div');
+    container.id = 'toast-container';
+    container.style.cssText = 'position:fixed;top:20px;right:20px;z-index:9999;display:flex;flex-direction:column;gap:8px;pointer-events:none;';
+    document.body.appendChild(container);
+  }
+  const toast = document.createElement('div');
+  toast.className = `toast toast-${type}`;
+  toast.style.cssText = 'pointer-events:auto;padding:12px 18px;border-radius:8px;font-size:13px;color:#f9fafb;backdrop-filter:blur(12px);box-shadow:0 4px 12px rgba(0,0,0,0.3);opacity:0;transform:translateX(40px);transition:all 0.3s ease;max-width:380px;word-break:break-word;';
+  const colors = { info: 'rgba(99,102,241,0.9)', success: 'rgba(16,185,129,0.9)', error: 'rgba(239,68,68,0.9)', warning: 'rgba(251,191,36,0.9)' };
+  toast.style.backgroundColor = colors[type] || colors.info;
+  toast.textContent = message;
+  container.appendChild(toast);
+  requestAnimationFrame(() => { toast.style.opacity = '1'; toast.style.transform = 'translateX(0)'; });
+  setTimeout(() => {
+    toast.style.opacity = '0';
+    toast.style.transform = 'translateX(40px)';
+    setTimeout(() => toast.remove(), 300);
+  }, duration);
+}
 
 // Context menu target reference
 let ctxTarget = null;
 
 // Track active transfer details
-let activeTransferId = null;
+let activeTransfers = new Set();
 let previewTransfers = {};
 let previewCancelled = {};
 
@@ -30,8 +108,10 @@ Neutralino.init();
 
 // Hook up Neutralino event listeners
 Neutralino.events.on('ready', () => {
-  console.log('Neutralino API ready!');
-  initApp();
+  window.addEventListener('contextmenu', (e) => e.preventDefault());
+  initApp().catch(err => {
+    showToast('Failed to initialize app: ' + err.message, 'error', 10000);
+  });
 });
 
 Neutralino.events.on('windowClose', () => {
@@ -41,50 +121,50 @@ Neutralino.events.on('windowClose', () => {
 
 // App Initialization
 async function initApp() {
+  await initConfigDir();
+  await loadTerminalSettings();
   setupEventListeners();
   await loadProfiles();
   setupExtensionListeners();
+  cleanupOldPreviewFiles();
 }
 
 // Register Listeners for Extension Events
 function setupExtensionListeners() {
-  // SSH connection success
   Neutralino.events.on('ssh.connected', (event) => {
     const { host, username } = event.detail;
     isConnected = true;
     
-    // Update Header Status
     const statusDot = document.getElementById('status-dot');
     statusDot.className = 'status-indicator connected';
     document.getElementById('status-text').textContent = `Connected: ${username}@${host}`;
     
-    // Toggle UI Visibility
     document.getElementById('btn-disconnect').classList.remove('hidden');
+    document.getElementById('btn-settings').classList.remove('hidden');
     document.getElementById('config-panel').classList.add('hidden');
     document.getElementById('terminal-panel').classList.remove('hidden');
     
     document.getElementById('profiles-pane').classList.add('hidden');
     document.getElementById('sftp-pane').classList.remove('hidden');
 
-    // Init Terminal
-    initTerminal();
+    const connectBtn = document.getElementById('btn-connect');
+    connectBtn.disabled = false;
+    connectBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path><polyline points="10 17 15 12 10 7"></polyline><line x1="15" y1="12" x2="3" y2="12"></line></svg> Connect Now';
 
-    // Query home/default directory list
+    initTerminal();
     currentPath = '.';
-    loadDirectory(currentPath);
+    setTimeout(() => loadDirectory(currentPath), 200);
   });
 
-  // SSH Connection or extension error
   Neutralino.events.on('ssh.error', (event) => {
     const { message } = event.detail;
-    alert(`SSH Error: ${message}`);
+    showToast(`SSH Error: ${message}`, 'error');
     setDisconnectedState();
   });
 
   // SSH connection termination
   Neutralino.events.on('ssh.disconnected', (event) => {
     const { message } = event.detail;
-    console.log(`SSH Disconnected: ${message}`);
     setDisconnectedState();
   });
 
@@ -96,7 +176,6 @@ function setupExtensionListeners() {
     }
   });
 
-  // Directory listing responses
   Neutralino.events.on('sftp.list.success', (event) => {
     const { path, files } = event.detail;
     currentPath = path;
@@ -106,61 +185,53 @@ function setupExtensionListeners() {
 
   Neutralino.events.on('sftp.list.error', (event) => {
     const { path, message } = event.detail;
-    alert(`Failed to list directory "${path}": ${message}`);
+    showToast(`Failed to list directory "${escapeHtml(path)}": ${escapeHtml(message)}`, 'error');
     document.getElementById('sftp-file-list').innerHTML = `
       <div class="empty-state" style="color: var(--accent-danger)">
-        Error: ${message}
+        Error: ${escapeHtml(message)}
       </div>
     `;
   });
 
-  // Operation (mkdir, delete, rename) success hooks
-  Neutralino.events.on('sftp.operation.success', (event) => {
-    const { action } = event.detail;
-    console.log(`SFTP Action complete: ${action}`);
-    // Reload folder
-    loadDirectory(currentPath);
-  });
-
   Neutralino.events.on('sftp.operation.error', (event) => {
     const { action, message, id } = event.detail;
+    activeTransfers.delete(id);
     if (id && previewTransfers[id]) {
       delete previewTransfers[id];
       showPreviewError(message);
       return;
     }
-    alert(`SFTP Action Failed [${action}]: ${message}`);
+    showToast(`SFTP Action Failed [${action}]: ${message}`, 'error');
     loadDirectory(currentPath);
   });
 
   // SFTP download hooks
   Neutralino.events.on('sftp.download.success', async (event) => {
     const { id, localPath } = event.detail;
+    activeTransfers.delete(id);
     if (previewTransfers[id]) {
       const previewData = previewTransfers[id];
       delete previewTransfers[id];
       await showPreview(previewData.localPath, previewData.filename);
     } else if (previewCancelled[id]) {
-      // User closed the preview before download finished — silently ignore
       delete previewCancelled[id];
     } else {
-      alert(`Download completed successfully:\n${localPath}`);
+      showToast(`Download completed:\n${localPath}`, 'success');
       hideTransferStatus();
     }
   });
 
-  // SFTP upload hooks
   Neutralino.events.on('sftp.upload.success', (event) => {
-    const { remotePath } = event.detail;
-    alert(`Upload completed successfully:\n${remotePath}`);
+    const { id, remotePath } = event.detail;
+    activeTransfers.delete(id);
+    showToast(`Upload completed:\n${remotePath}`, 'success');
     hideTransferStatus();
     loadDirectory(currentPath);
   });
 
-  // SFTP Transfer progress bar hook
   Neutralino.events.on('sftp.progress', (event) => {
     const { id, action, transferred, total, percent } = event.detail;
-    if (id === activeTransferId) {
+    if (activeTransfers.has(id)) {
       showTransferStatus(
         `${action === 'download' ? 'Downloading' : 'Uploading'}...`,
         percent,
@@ -176,36 +247,110 @@ function setupExtensionListeners() {
 // Reset UI to disconnected layout
 function setDisconnectedState() {
   isConnected = false;
+  activeTransfers.clear();
+  Object.keys(previewTransfers).forEach(k => { previewCancelled[k] = true; delete previewTransfers[k]; });
   
-  // Reset header
   const statusDot = document.getElementById('status-dot');
   statusDot.className = 'status-indicator disconnected';
   document.getElementById('status-text').textContent = 'Disconnected';
   document.getElementById('btn-disconnect').classList.add('hidden');
+  document.getElementById('btn-settings').classList.add('hidden');
   
-  // Hide panels
   document.getElementById('terminal-panel').classList.add('hidden');
   document.getElementById('config-panel').classList.remove('hidden');
   
   document.getElementById('sftp-pane').classList.add('hidden');
   document.getElementById('profiles-pane').classList.remove('hidden');
-  
-  // Destroy Terminal reference
+
+  const connectBtn = document.getElementById('btn-connect');
+  connectBtn.disabled = false;
+  connectBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path><polyline points="10 17 15 12 10 7"></polyline><line x1="15" y1="12" x2="3" y2="12"></line></svg> Connect Now';
+
   if (terminal) {
     terminal.dispose();
     terminal = null;
   }
+  if (fitAddon) {
+    fitAddon = null;
+  }
 }
 
 // Load SSH Terminal emulator
+let terminalSettings = {
+  fontSize: 14,
+  lineHeight: 1.5,
+  fontFamily: 'Fira Code'
+};
+
+async function loadTerminalSettings() {
+  try {
+    const data = await readConfig('terminal_settings');
+    if (data) Object.assign(terminalSettings, data);
+  } catch (e) { /* use defaults */ }
+}
+
+async function saveTerminalSettings() {
+  await writeConfig('terminal_settings', terminalSettings);
+}
+
+function applyTerminalSettings() {
+  if (terminal) {
+    terminal.options.fontSize = terminalSettings.fontSize;
+    terminal.options.lineHeight = terminalSettings.lineHeight;
+    terminal.options.fontFamily = `"${terminalSettings.fontFamily}", var(--font-mono)`;
+    if (fitAddon) fitAddon.fit();
+  }
+}
+
+function setupSettingsDialog() {
+  const fontSizeSlider = document.getElementById('settings-font-size');
+  const lineHeightSlider = document.getElementById('settings-line-height');
+  const fontSelect = document.getElementById('settings-font-family');
+  const fontSizeVal = document.getElementById('settings-font-size-val');
+  const lineHeightVal = document.getElementById('settings-line-height-val');
+
+  fontSizeSlider.value = terminalSettings.fontSize;
+  lineHeightSlider.value = terminalSettings.lineHeight;
+  fontSelect.value = terminalSettings.fontFamily;
+  fontSizeVal.textContent = terminalSettings.fontSize;
+  lineHeightVal.textContent = terminalSettings.lineHeight;
+
+  fontSizeSlider.addEventListener('input', () => {
+    fontSizeVal.textContent = fontSizeSlider.value;
+  });
+  lineHeightSlider.addEventListener('input', () => {
+    lineHeightVal.textContent = lineHeightSlider.value;
+  });
+
+  document.getElementById('form-settings').addEventListener('submit', (e) => {
+    e.preventDefault();
+    terminalSettings.fontSize = parseInt(fontSizeSlider.value);
+    terminalSettings.lineHeight = parseFloat(lineHeightSlider.value);
+    terminalSettings.fontFamily = fontSelect.value;
+    saveTerminalSettings();
+    applyTerminalSettings();
+    document.getElementById('dialog-settings').close();
+    showToast('Terminal settings applied', 'success');
+  });
+
+  document.getElementById('btn-settings').addEventListener('click', () => {
+    fontSizeSlider.value = terminalSettings.fontSize;
+    lineHeightSlider.value = terminalSettings.lineHeight;
+    fontSelect.value = terminalSettings.fontFamily;
+    fontSizeVal.textContent = terminalSettings.fontSize;
+    lineHeightVal.textContent = terminalSettings.lineHeight;
+    document.getElementById('dialog-settings').showModal();
+  });
+}
+
 function initTerminal() {
   const container = document.getElementById('terminal-container');
-  container.innerHTML = ''; // Clear container
+  container.innerHTML = '';
 
   terminal = new Terminal({
     cursorBlink: true,
     theme: {
-      background: '#0b0f19', // matches primary bg
+      background: '#0b0f19',
       foreground: '#cbd5e1',
       cursor: '#6366f1',
       black: '#000000',
@@ -217,27 +362,23 @@ function initTerminal() {
       cyan: '#06b6d4',
       white: '#f3f4f6'
     },
-    fontFamily: '"Fira Code", var(--font-mono)',
-    fontSize: 13,
-    rows: 30,
-    cols: 100
+    fontFamily: `"${terminalSettings.fontFamily}", var(--font-mono)`,
+    fontSize: terminalSettings.fontSize,
+    lineHeight: terminalSettings.lineHeight,
+    letterSpacing: 0
   });
 
-  fitAddon = new FitAddon.FitAddon();
+  fitAddon = new FitAddon.FitAddon ? new FitAddon.FitAddon() : new FitAddon();
   terminal.loadAddon(fitAddon);
   terminal.open(container);
   
-  // Trigger initial resize
-  fitAddon.fit();
-  
-  // Tell backend current terminal sizing details
   setTimeout(() => {
     fitAddon.fit();
     Neutralino.extensions.dispatch(extensionId, 'terminal.resize', {
       cols: terminal.cols,
       rows: terminal.rows
     });
-  }, 100);
+  }, 150);
 
   // Hook terminal input event to send to backend stream
   terminal.onData((data) => {
@@ -288,7 +429,6 @@ function setupEventListeners() {
         document.getElementById('ssh-key-path').value = selected[0];
       }
     } catch (err) {
-      console.error('Error selecting file:', err);
     }
   });
 
@@ -399,9 +539,9 @@ function setupEventListeners() {
       Neutralino.extensions.dispatch(extensionId, 'sftp.rename', { src: originalPath, dest: destPath });
     }
   });
-}
 
-// Request extension to fetch directory contents
+  setupSettingsDialog();
+}
 function loadDirectory(path) {
   document.getElementById('sftp-file-list').innerHTML = '<div class="loading-state">Loading directory...</div>';
   Neutralino.extensions.dispatch(extensionId, 'sftp.list', { path });
@@ -409,11 +549,17 @@ function loadDirectory(path) {
 
 // Connect to remote host
 function connectSsh() {
+  const connectBtn = document.getElementById('btn-connect');
+  if (connectBtn.disabled) return;
+  connectBtn.disabled = true;
+  connectBtn.textContent = 'Connecting...';
+
   const host = document.getElementById('ssh-host').value.trim();
   const port = document.getElementById('ssh-port').value.trim() || '22';
   const username = document.getElementById('ssh-username').value.trim();
   
-  const authType = document.querySelector('.auth-btn.active').getAttribute('data-target');
+  const authBtn = document.querySelector('.auth-btn.active');
+  const authType = authBtn ? authBtn.getAttribute('data-target') : 'password';
   
   const payload = { host, port, username };
 
@@ -425,13 +571,10 @@ function connectSsh() {
     payload.passphrase = document.getElementById('ssh-passphrase').value;
   }
 
-  // Update Status Banner
   document.getElementById('status-text').textContent = `Connecting to ${host}...`;
   
-  // Dispatch connect action to extension
   Neutralino.extensions.dispatch(extensionId, 'ssh.connect', payload);
 
-  // Save profile implicitly if Name is filled
   const profileName = document.getElementById('profile-name').value.trim();
   if (profileName) {
     saveProfileData(profileName, payload, authType);
@@ -479,7 +622,7 @@ function renderFileList(files) {
 
     item.innerHTML = `
       <div class="file-item-icon">${icon}</div>
-      <div class="file-item-name">${file.name}</div>
+      <div class="file-item-name">${escapeHtml(file.name)}</div>
       <div class="file-item-size">${file.isDir ? '--' : formatBytes(file.size)}</div>
     `;
 
@@ -530,7 +673,7 @@ function renderBreadcrumbs(pathStr) {
 
   parts.forEach((part, index) => {
     accumPath += '/' + part;
-    html += ` <span style="color: var(--text-muted)">/</span> <span class="crumb" data-path="${accumPath}">${part}</span>`;
+    html += ` <span style="color: var(--text-muted)">/</span> <span class="crumb" data-path="${escapeHtml(accumPath)}">${escapeHtml(part)}</span>`;
   });
 
   container.innerHTML = html;
@@ -557,18 +700,18 @@ async function triggerFileDownload(remoteFilePath, filename) {
     });
 
     if (localDest) {
-      activeTransferId = Math.random().toString(36).substring(7);
+      const transferId = Math.random().toString(36).substring(2, 9);
+      activeTransfers.add(transferId);
       
       showTransferStatus('Preparing Download...', 0, 'Starting stream...');
       
       Neutralino.extensions.dispatch(extensionId, 'sftp.download', {
-        id: activeTransferId,
+        id: transferId,
         remotePath: remoteFilePath,
         localPath: localDest
       });
     }
   } catch (err) {
-    console.error('Download init error:', err);
   }
 }
 
@@ -608,18 +751,18 @@ async function triggerUpload() {
       const filename = localFilePath.split(/[/\\]/).pop();
       const remoteFilePath = joinPath(currentPath, filename);
 
-      activeTransferId = Math.random().toString(36).substring(7);
+      const transferId = Math.random().toString(36).substring(2, 9);
+      activeTransfers.add(transferId);
       
       showTransferStatus('Preparing Upload...', 0, 'Starting stream...');
 
       Neutralino.extensions.dispatch(extensionId, 'sftp.upload', {
-        id: activeTransferId,
+        id: transferId,
         localPath: localFilePath,
         remotePath: remoteFilePath
       });
     }
   } catch (err) {
-    console.error('Upload error:', err);
   }
 }
 
@@ -636,7 +779,7 @@ function showTransferStatus(title, percent, meta) {
 // Hide transfer bar panel
 function hideTransferStatus() {
   document.getElementById('transfer-panel').classList.add('hidden');
-  activeTransferId = null;
+  activeTransfers.clear();
 }
 
 // Save connection profile directly from Form
@@ -646,7 +789,7 @@ async function saveProfile() {
   const username = document.getElementById('ssh-username').value.trim();
   
   if (!host || !username) {
-    alert('Please fill out Host and Username to save a profile.');
+    showToast('Please fill out Host and Username to save a profile.', 'warning');
     return;
   }
 
@@ -668,7 +811,7 @@ async function saveProfile() {
   }
 
   await saveProfileData(name, payload, authType);
-  alert(`Profile "${name}" saved!`);
+  showToast(`Profile "${name}" saved!`, 'success');
 }
 
 // Profiles local persistence writing
@@ -689,18 +832,17 @@ async function saveProfileData(name, credentials, authType) {
   }
 
   try {
-    await Neutralino.storage.setData('ssh_profiles', JSON.stringify(profiles));
+    await writeConfig('ssh_profiles', profiles);
     renderProfiles();
   } catch (err) {
-    console.error('Error saving profiles to storage:', err);
   }
 }
 
-// Load connection profiles from Neutralino storage
+// Load connection profiles from OS config directory
 async function loadProfiles() {
   try {
-    const raw = await Neutralino.storage.getData('ssh_profiles');
-    profiles = JSON.parse(raw);
+    const data = await readConfig('ssh_profiles');
+    profiles = data || [];
   } catch (err) {
     profiles = [];
   }
@@ -723,8 +865,8 @@ function renderProfiles() {
     
     item.innerHTML = `
       <div class="profile-info">
-        <span class="profile-name">${p.name}</span>
-        <span class="profile-host">${p.credentials.username}@${p.credentials.host}:${p.credentials.port}</span>
+        <span class="profile-name">${escapeHtml(p.name)}</span>
+        <span class="profile-host">${escapeHtml(p.credentials.username)}@${escapeHtml(p.credentials.host)}:${escapeHtml(p.credentials.port)}</span>
       </div>
       <div class="profile-item-actions">
         <button class="btn-icon-sm btn-delete-profile" title="Delete Profile">
@@ -752,10 +894,9 @@ function renderProfiles() {
       if (confirm === 'YES') {
         profiles = profiles.filter(prof => prof.id !== p.id);
         try {
-          await Neutralino.storage.setData('ssh_profiles', JSON.stringify(profiles));
+          await writeConfig('ssh_profiles', profiles);
           renderProfiles();
         } catch (err) {
-          console.error(err);
         }
       }
     });
@@ -866,8 +1007,7 @@ async function triggerPreview() {
       localPath: localPath
     });
   } catch (err) {
-    console.error('Preview init error:', err);
-    alert('Failed to initialize preview: ' + err.message);
+    showToast('Failed to initialize preview: ' + err.message, 'error');
   }
 }
 
@@ -938,7 +1078,7 @@ async function detectFileType(localPath, filename) {
 
   // Last resort: try to read a sample as text and see if it looks printable
   try {
-    const sample = await Neutralino.filesystem.readFile(localPath);
+    const sample = await Neutralino.filesystem.readFile(localPath, { pos: 0, size: 4096 });
     if (isPrintableText(sample)) {
       return { category: 'text', mime: 'text/plain' };
     }
@@ -1019,11 +1159,17 @@ async function showPreview(localPath, filename) {
   dialog.setAttribute('data-local-path', localPath);
   dialog.setAttribute('data-filename', filename);
 
+  // Revoke existing blob URLs before creating new ones
+  if (img.src && img.src.startsWith('blob:')) { URL.revokeObjectURL(img.src); img.src = ''; }
+  if (pdfFrame.src && pdfFrame.src.startsWith('blob:')) { URL.revokeObjectURL(pdfFrame.src); pdfFrame.src = 'about:blank'; }
+
   // Hide all containers
   [imgContainer, textContainer, pdfContainer, videoContainer, audioContainer, unsupportedContainer].forEach(el => el.classList.add('hidden'));
 
-  // Reset media elements
+  // Reset media elements (revoke blobs first)
+  if (videoEl.src && videoEl.src.startsWith('blob:')) URL.revokeObjectURL(videoEl.src);
   videoEl.pause(); videoEl.removeAttribute('src'); videoEl.load();
+  if (audioEl.src && audioEl.src.startsWith('blob:')) URL.revokeObjectURL(audioEl.src);
   audioEl.pause(); audioEl.removeAttribute('src'); audioEl.load();
 
   let stats = null;
@@ -1074,7 +1220,6 @@ async function showPreview(localPath, filename) {
       dialog.showModal();
     }
   } catch (err) {
-    console.error('Error loading preview:', err);
     showPreviewError(err.message || 'Failed to load preview');
   }
 }
@@ -1110,41 +1255,21 @@ async function savePreviewAs() {
     const dest = await Neutralino.os.showSaveDialog('Save file', { defaultPath: filename });
     if (dest) {
       await Neutralino.filesystem.copy(localPath, dest, { recursive: false, overwrite: true, skip: false });
-      alert(`Saved to:\n${dest}`);
+      showToast(`Saved to:\n${dest}`, 'success');
     }
   } catch (err) {
-    console.error('Save as error:', err);
-    alert('Failed to save file: ' + err.message);
+    showToast('Failed to save file: ' + err.message, 'error');
   }
 }
 
 // Open unsupported preview files with the system's default application
 async function openPreviewWithExternalApp() {
-  const path = document.getElementById('dialog-preview').getAttribute('data-local-path');
-  if (!path) return;
+  const localPath = document.getElementById('dialog-preview').getAttribute('data-local-path');
+  if (!localPath) return;
   try {
-    if (Neutralino.os.open) {
-      await Neutralino.os.open(path);
-    } else {
-      throw new Error('os.open not available');
-    }
+    await Neutralino.os.open(localPath);
   } catch (err) {
-    console.warn('os.open failed, falling back to execCommand:', err);
-    const os = window.NL_OS;
-    let cmd = '';
-    if (os === 'Windows') {
-      cmd = `start "" "${path}"`;
-    } else if (os === 'Darwin') {
-      cmd = `open "${path}"`;
-    } else {
-      cmd = `xdg-open "${path}"`;
-    }
-    try {
-      await Neutralino.os.execCommand(cmd);
-    } catch (execErr) {
-      console.error('Fallback open failed:', execErr);
-      alert('Could not open file with default app.');
-    }
+    showToast('Could not open file with default app.', 'error');
   }
   document.getElementById('dialog-preview').close();
 }
@@ -1163,6 +1288,12 @@ function cleanupPreviewResources() {
   }
   dialog.removeAttribute('data-transfer-id');
 
+  // Delete temp file
+  const localPath = dialog.getAttribute('data-local-path');
+  if (localPath && localPath.includes('ripple_preview_')) {
+    Neutralino.filesystem.remove(localPath).catch(() => {});
+  }
+
   const img = document.getElementById('preview-image');
   if (img.src && img.src.startsWith('blob:')) { URL.revokeObjectURL(img.src); img.src = ''; }
 
@@ -1175,15 +1306,26 @@ function cleanupPreviewResources() {
   const audioEl = document.getElementById('preview-audio');
   if (audioEl.src && audioEl.src.startsWith('blob:')) { URL.revokeObjectURL(audioEl.src); audioEl.removeAttribute('src'); audioEl.load(); }
 
-  // Restore default unsupported message for next use
   const msg = dialog.querySelector('.preview-unsupported-message');
   if (msg) msg.textContent = 'This file type cannot be previewed.';
 
-  // Reset loading state for next use
   const loading = document.getElementById('preview-loading-container');
   if (loading) loading.style.display = 'none';
   updatePreviewProgress(0, 0, 0);
 
   dialog.removeAttribute('data-local-path');
   dialog.removeAttribute('data-filename');
+}
+
+// Clean up old preview temp files on startup
+async function cleanupOldPreviewFiles() {
+  try {
+    const tempDir = await Neutralino.os.getPath('temp');
+    const entries = await Neutralino.filesystem.readDirectory(tempDir);
+    for (const entry of entries) {
+      if (entry.type === 'File' && entry.entry.startsWith('ripple_preview_')) {
+        await Neutralino.filesystem.remove(tempDir + (window.NL_OS === 'Windows' ? '\\' : '/') + entry.entry).catch(() => {});
+      }
+    }
+  } catch (e) { /* ignore */ }
 }

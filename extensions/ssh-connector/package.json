@@ -1,0 +1,10 @@
+{
+  "name": "ssh-connector",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "SSH/SFTP extension for Ripple SSH",
+  "dependencies": {
+    "ssh2": "^1.16.0",
+    "ws": "^8.18.0"
+  }
+}

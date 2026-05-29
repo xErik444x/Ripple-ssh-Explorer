@@ -5,37 +5,43 @@ import WebSocket from 'ws';
 import { Client } from 'ssh2';
 import crypto from 'crypto';
 
-// Setup file paths
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Redirect logs to extension.log for background debugging
+// Logging to file without overriding global console (#16)
 const logFile = path.join(__dirname, 'extension.log');
 fs.writeFileSync(logFile, `=== Extension started at ${new Date().toISOString()} ===\n`);
 const logStream = fs.createWriteStream(logFile, { flags: 'a' });
 
-console.log = function(...args) {
+function log(...args) {
   logStream.write(`[INFO] ${args.map(a => typeof a === 'object' ? JSON.stringify(a) : a).join(' ')}\n`);
-};
-console.error = function(...args) {
+}
+function logError(...args) {
   logStream.write(`[ERROR] ${args.map(a => typeof a === 'object' ? JSON.stringify(a) : a).join(' ')}\n`);
-};
+}
 
 process.on('uncaughtException', (err) => {
   fs.appendFileSync(logFile, `[CRITICAL Exception] ${err.stack || err}\n`);
+  cleanup();
   process.exit(1);
 });
 
 process.on('unhandledRejection', (reason) => {
   fs.appendFileSync(logFile, `[CRITICAL Rejection] ${reason}\n`);
+  cleanup();
+  process.exit(1);
 });
+
+// #17 SIGTERM/SIGINT cleanup
+process.on('SIGTERM', () => { cleanup(); process.exit(0); });
+process.on('SIGINT', () => { cleanup(); process.exit(0); });
 
 // Read configurations from stdin passed by Neutralino
 let rawInput = '';
 try {
   rawInput = fs.readFileSync(0, 'utf-8');
 } catch (err) {
-  console.error('[Extension] Error reading stdin:', err);
+  logError('Error reading stdin:', err);
   process.exit(1);
 }
 
@@ -43,7 +49,7 @@ let initData;
 try {
   initData = JSON.parse(rawInput);
 } catch (err) {
-  console.error('[Extension] Invalid JSON on stdin:', err);
+  logError('Invalid JSON on stdin:', err);
   process.exit(1);
 }
 
@@ -58,19 +64,20 @@ let conn = null;
 let sftp = null;
 let shellStream = null;
 let activeHost = '';
+let connectionGeneration = 0; // #5 Race condition guard
 
 ws.on('open', () => {
-  console.log(`[Extension] Connected to Neutralino Core on port ${nlPort}`);
+  log(`Connected to Neutralino Core on port ${nlPort}`);
 });
 
 ws.on('close', (code, reason) => {
-  console.log(`[Extension] Neutralino Core connection closed (${code}): ${reason}`);
+  log(`Neutralino Core connection closed (${code}): ${reason}`);
   cleanup();
   process.exit(0);
 });
 
 ws.on('error', (err) => {
-  console.error('[Extension] WebSocket Error:', err);
+  logError('WebSocket Error:', err);
 });
 
 ws.on('message', (messageRaw) => {
@@ -78,7 +85,7 @@ ws.on('message', (messageRaw) => {
   try {
     payload = JSON.parse(messageRaw);
   } catch (err) {
-    console.error('[Extension] Failed to parse WebSocket message:', err);
+    logError('Failed to parse WebSocket message:', err);
     return;
   }
 
@@ -90,7 +97,10 @@ ws.on('message', (messageRaw) => {
 
 // Send an event back to the Neutralinojs app
 function sendToFrontend(event, data) {
-  if (ws.readyState !== WebSocket.OPEN) return;
+  if (ws.readyState !== WebSocket.OPEN) {
+    logError('sendToFrontend: WebSocket not open, event:', event, 'state:', ws.readyState);
+    return;
+  }
   const response = {
     id: crypto.randomUUID(),
     method: 'app.broadcast',
@@ -100,20 +110,23 @@ function sendToFrontend(event, data) {
       data
     }
   };
-  ws.send(JSON.stringify(response));
+  const msg = JSON.stringify(response);
+  log('sendToFrontend:', event, 'msg size:', msg.length);
+  ws.send(msg);
 }
 
 // Global cleanup function to shut down active connections
 function cleanup() {
   if (shellStream) {
-    try { shellStream.end(); } catch (e) {}
+    try { shellStream.end(); } catch (e) { logError('Error ending shellStream:', e); }
     shellStream = null;
   }
   if (sftp) {
-    sftp = null; // will close automatically with client
+    try { sftp.end(); } catch (e) { logError('Error ending sftp:', e); }
+    sftp = null;
   }
   if (conn) {
-    try { conn.end(); } catch (e) {}
+    try { conn.end(); } catch (e) { logError('Error ending conn:', e); }
     conn = null;
   }
   activeHost = '';
@@ -121,6 +134,7 @@ function cleanup() {
 
 // Central event router
 function handleEvent(event, data) {
+  log('Event received:', event);
   switch (event) {
     case 'ssh.connect':
       handleConnect(data);
@@ -153,33 +167,48 @@ function handleEvent(event, data) {
       handleSftpMkdir(data);
       break;
     default:
-      console.warn(`[Extension] Unknown event: ${event}`);
+      log(`Unknown event: ${event}`);
   }
 }
 
 // Connect to remote SSH host
 function handleConnect(data) {
   cleanup();
+  const myGeneration = ++connectionGeneration;
+
+  // #3 Path traversal validation: restrict to user home and temp dirs
+  function isPathAllowed(p) {
+    if (!p || typeof p !== 'string') return false;
+    const resolved = path.resolve(p);
+    const home = process.env.USERPROFILE || process.env.HOME || '';
+    const temp = process.env.TEMP || process.env.TMPDIR || '/tmp';
+    const isChildOf = (parent, child) => child.startsWith(parent);
+    return isChildOf(home, resolved) || isChildOf(temp, resolved);
+  }
 
   const config = {
     host: data.host,
     port: parseInt(data.port) || 22,
     username: data.username,
     readyTimeout: 20000,
-    keepaliveInterval: 10000
+    keepaliveInterval: 10000,
+    keepaliveCountMax: 5
   };
 
   if (data.password) {
     config.password = data.password;
   }
 
-  // Handle private keys
   if (data.privateKeyText) {
     config.privateKey = data.privateKeyText;
     if (data.passphrase) {
       config.passphrase = data.passphrase;
     }
   } else if (data.privateKeyPath) {
+    if (!isPathAllowed(data.privateKeyPath)) {
+      sendToFrontend('ssh.error', { message: 'Private key path is not in an allowed directory.' });
+      return;
+    }
     try {
       config.privateKey = fs.readFileSync(data.privateKeyPath, 'utf8');
       if (data.passphrase) {
@@ -194,20 +223,25 @@ function handleConnect(data) {
   conn = new Client();
 
   conn.on('ready', () => {
+    if (myGeneration !== connectionGeneration) return;
     activeHost = data.host;
+    log('SSH ready, initializing SFTP...');
     
-    // Initialize SFTP
     conn.sftp((err, sftpInstance) => {
+      if (myGeneration !== connectionGeneration) return;
       if (err) {
+        logError('SFTP init failed:', err.message);
         sendToFrontend('ssh.error', { message: `SFTP Subsystem Init Failed: ${err.message}` });
         cleanup();
         return;
       }
       sftp = sftpInstance;
+      log('SFTP initialized successfully');
 
-      // Start shell stream for terminal interface
       conn.shell({ term: 'xterm-256color', cols: 80, rows: 24 }, (shellErr, stream) => {
+        if (myGeneration !== connectionGeneration) return;
         if (shellErr) {
+          logError('Shell init failed:', shellErr.message);
           sendToFrontend('ssh.error', { message: `Interactive Shell Init Failed: ${shellErr.message}` });
           cleanup();
           return;
@@ -215,28 +249,29 @@ function handleConnect(data) {
 
         shellStream = stream;
 
-        // Feed data stream to terminal
         stream.on('data', (chunk) => {
           sendToFrontend('terminal.data', { data: chunk.toString('utf8') });
         });
 
         stream.on('close', () => {
+          if (myGeneration !== connectionGeneration) return;
           sendToFrontend('ssh.disconnected', { message: 'Connection terminated by remote host' });
           cleanup();
         });
 
-        // Trigger connected confirmation
         sendToFrontend('ssh.connected', { host: data.host, username: data.username });
       });
     });
   });
 
   conn.on('error', (err) => {
+    if (myGeneration !== connectionGeneration) return;
     sendToFrontend('ssh.error', { message: `SSH Connection Error: ${err.message}` });
     cleanup();
   });
 
   conn.on('close', () => {
+    if (myGeneration !== connectionGeneration) return;
     sendToFrontend('ssh.disconnected', { message: 'Connection closed' });
     cleanup();
   });
@@ -262,48 +297,109 @@ function handleTerminalWrite(data) {
   }
 }
 
-// Resize terminal window
 function handleTerminalResize(data) {
   if (shellStream) {
     try {
-      shellStream.setWindow(parseInt(data.rows), parseInt(data.cols), 0, 0);
+      shellStream.setWindow(parseInt(data.rows) || 24, parseInt(data.cols) || 80, 0, 0);
     } catch (err) {
-      console.error('[Extension] Error setting window size:', err);
+      logError('Error setting window size:', err);
     }
   }
 }
 
-// List directory content
+// Reinitialize SFTP subsystem if it hangs
+function reconnectSftp() {
+  if (!conn) {
+    logError('reconnectSftp: no connection');
+    return;
+  }
+  log('Attempting SFTP reconnection...');
+  try {
+    conn.sftp((err, sftpInstance) => {
+      if (err) {
+        logError('SFTP reconnect failed:', err.message);
+        return;
+      }
+      sftp = sftpInstance;
+      log('SFTP reconnected successfully');
+    });
+  } catch (e) {
+    logError('SFTP reconnect exception:', e.message);
+  }
+}
+
+// List directory using exec fallback (more reliable than sftp.readdir which can hang)
 function handleSftpList(data) {
-  if (!sftp) {
-    sendToFrontend('sftp.list.error', { path: data.path, message: 'SFTP connection is not active' });
+  log('sftp.list received, sftp active:', !!sftp, 'path:', data?.path);
+  const targetPath = data.path || '.';
+  
+  if (!conn) {
+    sendToFrontend('sftp.list.error', { path: targetPath, message: 'SSH connection is not active' });
     return;
   }
 
-  const targetPath = data.path || '.';
+  const cmd = `ls -la ${targetPath}`;
+  log('exec:', cmd);
 
-  sftp.readdir(targetPath, (err, list) => {
+  let output = '';
+  let callbackFired = false;
+  const timeout = setTimeout(() => {
+    if (!callbackFired) {
+      callbackFired = true;
+      logError('exec timed out for:', targetPath);
+      sendToFrontend('sftp.list.error', { path: targetPath, message: 'Command timed out' });
+    }
+  }, 15000);
+
+  conn.exec(cmd, (err, stream) => {
+    if (callbackFired) return;
     if (err) {
+      callbackFired = true;
+      clearTimeout(timeout);
+      logError('exec error:', err.message);
       sendToFrontend('sftp.list.error', { path: targetPath, message: err.message });
       return;
     }
 
-    const files = list.map(item => {
-      const isDir = item.longname.startsWith('d');
-      const isLink = item.longname.startsWith('l');
-      return {
-        name: item.filename,
-        size: item.attrs.size,
-        mtime: item.attrs.mtime * 1000, // Unix timestamp in s -> ms
-        isDir,
-        isLink,
-        permissions: item.attrs.permissions,
-        longname: item.longname
-      };
-    });
+    stream.on('data', (data) => { output += data.toString(); });
+    stream.stderr.on('data', (data) => { output += data.toString(); });
+    stream.on('close', (code) => {
+      if (callbackFired) return;
+      callbackFired = true;
+      clearTimeout(timeout);
+      log('exec closed, code:', code, 'output length:', output.length);
+      
+      if (code !== 0) {
+        sendToFrontend('sftp.list.error', { path: targetPath, message: output.trim() || 'Command failed' });
+        return;
+      }
 
-    sendToFrontend('sftp.list.success', { path: targetPath, files });
+      try {
+        const files = parseLsOutput(output, targetPath);
+        log('Parsed files:', files.length);
+        sendToFrontend('sftp.list.success', { path: targetPath, files });
+        log('sendToFrontend sftp.list.success called');
+      } catch (parseErr) {
+        logError('parse error:', parseErr.message);
+        sendToFrontend('sftp.list.error', { path: targetPath, message: 'Failed to parse directory listing' });
+      }
+    });
   });
+}
+
+function parseLsOutput(output, basePath) {
+  const lines = output.split('\n').filter(l => l.trim() && !l.startsWith('total'));
+  return lines.map(line => {
+    const parts = line.split(/\s+/);
+    if (parts.length < 9) return null;
+    const perms = parts[0];
+    const name = parts.slice(8).join(' ');
+    if (name === '.' || name === '..') return null;
+    const isDir = perms.startsWith('d');
+    const isLink = perms.startsWith('l');
+    const size = parseInt(parts[4]) || 0;
+    return { name, size, isDir, isLink, permissions: perms };
+  }).filter(Boolean);
 }
 
 // Download a remote file
@@ -313,7 +409,11 @@ function handleSftpDownload(data) {
     return;
   }
 
-  // Ensure local parent directory exists
+  if (!data.localPath || !data.remotePath) {
+    sendToFrontend('sftp.operation.error', { id: data.id, action: 'download', message: 'Missing localPath or remotePath' });
+    return;
+  }
+
   try {
     const localDir = path.dirname(data.localPath);
     if (!fs.existsSync(localDir)) {
@@ -345,10 +445,14 @@ function handleSftpDownload(data) {
   });
 }
 
-// Upload a local file
 function handleSftpUpload(data) {
   if (!sftp) {
     sendToFrontend('sftp.operation.error', { id: data.id, action: 'upload', message: 'SFTP connection is not active' });
+    return;
+  }
+
+  if (!data.localPath || !data.remotePath) {
+    sendToFrontend('sftp.operation.error', { id: data.id, action: 'upload', message: 'Missing localPath or remotePath' });
     return;
   }
 
@@ -373,10 +477,14 @@ function handleSftpUpload(data) {
   });
 }
 
-// Delete remote file or folder
 function handleSftpDelete(data) {
   if (!sftp) {
     sendToFrontend('sftp.operation.error', { action: 'delete', path: data.path, message: 'SFTP connection is not active' });
+    return;
+  }
+
+  if (!data.path) {
+    sendToFrontend('sftp.operation.error', { action: 'delete', path: data.path, message: 'Missing path' });
     return;
   }
 
@@ -391,10 +499,14 @@ function handleSftpDelete(data) {
   });
 }
 
-// Rename/Move remote file or folder
 function handleSftpRename(data) {
   if (!sftp) {
     sendToFrontend('sftp.operation.error', { action: 'rename', path: data.src, message: 'SFTP connection is not active' });
+    return;
+  }
+
+  if (!data.src || !data.dest) {
+    sendToFrontend('sftp.operation.error', { action: 'rename', path: data.src, message: 'Missing source or destination' });
     return;
   }
 
@@ -407,10 +519,14 @@ function handleSftpRename(data) {
   });
 }
 
-// Create a remote directory
 function handleSftpMkdir(data) {
   if (!sftp) {
     sendToFrontend('sftp.operation.error', { action: 'mkdir', path: data.path, message: 'SFTP connection is not active' });
+    return;
+  }
+
+  if (!data.path) {
+    sendToFrontend('sftp.operation.error', { action: 'mkdir', path: data.path, message: 'Missing path' });
     return;
   }
 
