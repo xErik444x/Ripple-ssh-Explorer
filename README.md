@@ -46,33 +46,6 @@ Ripple SSH is a lightweight desktop SSH client that lets you connect to remote s
 - **Real-time Transfer Progress** — Live progress bars for file uploads and downloads
 - **Server Mode** — Run as an HTTP server, access from any browser. No GUI dependencies needed.
 - **Settings Panel** — Configure font size, line height, and font family in real time
-- **Auto Releases** — Push a version bump to `VERSION` file and CI/CD builds & publishes all binaries automatically.
-
----
-
-## How it works
-
-```
-┌──────────────────────────────┐
-│    Frontend (WebView)        │
-│  HTML + CSS + JS + xterm.js  │
-│  Embedded in the binary      │
-└──────────┬───────────────────┘
-           │ Go bindings (type-safe)
-           ▼
-┌──────────────────────────────┐
-│  Go Backend (compiled in)    │
-│  SSH via golang.org/x/crypto │
-│  SFTP via github.com/pkg/sftp│
-└──────────┬───────────────────┘
-           │ SSH / SFTP
-           ▼
-┌──────────────────────────────┐
-│    Remote SSH Server         │
-└──────────────────────────────┘
-```
-
-Everything is compiled into a **single ~15MB executable** — no Node.js, no npm, no runtime dependencies.
 
 ---
 
@@ -151,34 +124,6 @@ In desktop mode, press F12 to open devtools. In server mode, open your browser's
 | Cross-platform (Windows, Linux, macOS) | ✅ |
 | Single portable executable | ✅ |
 | No runtime dependencies | ✅ |
-
----
-
-## Project Structure
-
-```
-Ripple-ssh-Explorer/
-├── main.go              # App entry point + Wails config
-├── app.go               # SSH/SFTP backend (Go methods bound to frontend)
-├── server_mode.go       # Server mode init (opens browser automatically)
-├── go.mod / go.sum      # Go dependencies
-├── wails.json           # Wails project config
-├── Taskfile.yml         # Wails build tasks
-├── VERSION              # Current version (triggers CI/CD release)
-├── frontend/
-│   ├── index.html       # App UI
-│   ├── bindings/        # Auto-generated Go→JS bindings
-│   ├── public/
-│   │   ├── xterm.js     # Terminal emulator library
-│   │   └── xterm-addon-fit.js
-│   └── src/
-│       ├── main.js      # Frontend logic
-│       ├── style.css    # App styles
-│       ├── xterm.css    # Terminal styles
-│       └── fonts/       # Bundled fonts (Inter, Outfit, Fira Code)
-├── .github/workflows/   # CI/CD — auto-builds and releases on version change
-└── build/               # Platform-specific build configs
-```
 
 ---
 
