@@ -10,7 +10,7 @@ Built with [Wails v3](https://v3.wails.io) + [Go](https://go.dev) + vanilla HTML
 [![Wails](https://img.shields.io/badge/Wails-v3-blue.svg)](https://v3.wails.io)
 [![Go](https://img.shields.io/badge/Go-1.24-00ADD8.svg)](https://go.dev)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux-lightgrey.svg)]()
-
+[![Build and Release](https://github.com/xErik444x/Ripple-ssh-Explorer/actions/workflows/build-and-release.yml/badge.svg?branch=main)](https://github.com/xErik444x/Ripple-ssh-Explorer/actions/workflows/build-and-release.yml)
 <p>
   <a href="https://github.com/xErik444x/Ripple-ssh-Explorer/releases/latest">
     <img src="https://img.shields.io/badge/Download-Latest_Release-2ea44f?style=for-the-badge&logo=github" alt="Download Latest Release">
