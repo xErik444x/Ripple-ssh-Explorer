@@ -103,15 +103,21 @@ jobs:
         run: |
           TAGS="${{ matrix.tags }}"
           if [ -n "$TAGS" ]; then
-            wails3 build -tags "$TAGS"
+            wails3 build -tags "gtk3 $TAGS"
           else
-            wails3 build
+            wails3 build -tags "gtk3"
           fi
 
       - name: Build (Linux server)
         if: runner.os == 'Linux' && matrix.server == true
         shell: bash
-        run: wails3 task build:server
+        run: |
+          TAGS="${{ matrix.tags }}"
+          if [ -n "$TAGS" ]; then
+            wails3 task build:server BUILD_FLAGS="-tags gtk3 $TAGS"
+          else
+            wails3 task build:server BUILD_FLAGS="-tags gtk3"
+          fi
 
       - name: Rename output (Windows)
         if: runner.os == 'Windows'
