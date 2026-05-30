@@ -1,5 +1,3 @@
-//go:build !server
-
 // Ripple SSH — SSH & SFTP Client
 // Made with ❤️ by Erik Schwerdt
 package main
