@@ -4,12 +4,18 @@
 
 **SSH & SFTP Client** — Single portable executable, no dependencies.
 
-Built with [Wails v2](https://wails.io) + [Go](https://go.dev) + vanilla HTML/CSS/JS.
+Built with [Wails v3](https://v3.wails.io) + [Go](https://go.dev) + vanilla HTML/CSS/JS.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Wails](https://img.shields.io/badge/Wails-v2-blue.svg)](https://wails.io)
-[![Go](https://img.shields.io/badge/Go-1.23-00ADD8.svg)](https://go.dev)
-[![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey.svg)]()
+[![Wails](https://img.shields.io/badge/Wails-v3-blue.svg)](https://v3.wails.io)
+[![Go](https://img.shields.io/badge/Go-1.24-00ADD8.svg)](https://go.dev)
+[![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux-lightgrey.svg)]()
+
+<p>
+  <a href="https://github.com/xErik444x/Ripple-ssh-Explorer/releases/latest">
+    <img src="https://img.shields.io/badge/Download-Latest_Release-2ea44f?style=for-the-badge&logo=github" alt="Download Latest Release">
+  </a>
+</p>
 
 </div>
 
@@ -38,7 +44,9 @@ Ripple SSH is a lightweight desktop SSH client that lets you connect to remote s
 - **Connection Profiles** — Save and manage multiple SSH connections with credentials
 - **Context Menu** — Right-click to copy/paste in the terminal, manage files in the explorer
 - **Real-time Transfer Progress** — Live progress bars for file uploads and downloads
+- **Server Mode** — Run as an HTTP server, access from any browser. No GUI dependencies needed.
 - **Settings Panel** — Configure font size, line height, and font family in real time
+- **Auto Releases** — Push a version bump to `VERSION` file and CI/CD builds & publishes all binaries automatically.
 
 ---
 
@@ -64,7 +72,7 @@ Ripple SSH is a lightweight desktop SSH client that lets you connect to remote s
 └──────────────────────────────┘
 ```
 
-Everything is compiled into a **single ~12MB executable** — no Node.js, no npm, no runtime dependencies.
+Everything is compiled into a **single ~15MB executable** — no Node.js, no npm, no runtime dependencies.
 
 ---
 
@@ -72,33 +80,40 @@ Everything is compiled into a **single ~12MB executable** — no Node.js, no npm
 
 ### Option 1: Download the release
 
-1. Download `ripple-ssh-windows-amd64.exe` from [Releases](https://github.com/xErik444x/Ripple-ssh-Explorer/releases)
-2. Double-click to run
-3. Enter your SSH server details and click Connect
+[![Download Latest Release](https://img.shields.io/badge/Download-Latest_Release-2ea44f?style=for-the-badge&logo=github)](https://github.com/xErik444x/Ripple-ssh-Explorer/releases/latest)
+
+Choose your platform:
+
+| File | Platform | Description |
+|------|----------|-------------|
+| `ripple-ssh-windows-amd64.exe` | Windows | Desktop app with native WebView2 window |
+| `ripple-ssh-linux-amd64` | Linux | Desktop app with WebKitGTK window (`sudo apt install libwebkit2gtk-4.1-dev`) |
+| `ripple-ssh-linux-amd64-server` | Linux | **Server mode** — pure HTTP server, no GUI dependencies. Open `http://localhost:8080` in your browser. |
 
 ### Option 2: Build from source
 
 **Prerequisites:**
-- [Go](https://go.dev/dl/) v1.23+
-- [Wails CLI](https://wails.io/docs/gettingstarted/installation): `go install github.com/wailsapp/wails/v2/cmd/wails@latest`
+- [Go](https://go.dev/dl/) v1.24+
+- [Wails CLI](https://v3.wails.io/getting-started/installation/): `go install github.com/wailsapp/wails/v3/cmd/wails3@latest`
 - [Node.js](https://nodejs.org/) v18+ (for frontend build)
 
 ```bash
 git clone https://github.com/xErik444x/Ripple-ssh-Explorer.git
-cd ripple-ssh-wails
+cd Ripple-ssh-Explorer
 npm install --prefix frontend
-wails build
+wails3 build
 ```
 
-The executable will be at `build/bin/ripple-ssh.exe`
+The executable will be at `bin/ripple-ssh.exe` (Windows) or `bin/ripple-ssh` (Linux).
 
 ### Build commands
 
 | Command | Description |
 |---------|-------------|
-| `wails dev` | Run in development mode with hot reload |
-| `wails build` | Build production executable (~12MB) |
-| `wails build -devtools` | Build with devtools (F12) for debugging |
+| `wails3 dev` | Run in development mode with hot reload |
+| `wails3 build` | Build production executable |
+| `wails3 task build:server` | Build Linux server mode executable |
+| `wails3 task run:server` | Build and run server mode |
 
 ---
 
@@ -108,7 +123,7 @@ The executable will be at `build/bin/ripple-ssh.exe`
 The app writes logs to `ripple-ssh.log` in the same directory as the executable. Check this file for SSH/SFTP errors.
 
 ### Frontend console
-Build with `-devtools` flag, then press F12 in the app window to open the WebView devtools.
+In desktop mode, press F12 to open devtools. In server mode, open your browser's devtools (F12).
 
 ---
 
@@ -142,13 +157,17 @@ Build with `-devtools` flag, then press F12 in the app window to open the WebVie
 ## Project Structure
 
 ```
-ripple-ssh-wails/
+Ripple-ssh-Explorer/
 ├── main.go              # App entry point + Wails config
 ├── app.go               # SSH/SFTP backend (Go methods bound to frontend)
+├── server_mode.go       # Server mode init (opens browser automatically)
 ├── go.mod / go.sum      # Go dependencies
 ├── wails.json           # Wails project config
+├── Taskfile.yml         # Wails build tasks
+├── VERSION              # Current version (triggers CI/CD release)
 ├── frontend/
 │   ├── index.html       # App UI
+│   ├── bindings/        # Auto-generated Go→JS bindings
 │   ├── public/
 │   │   ├── xterm.js     # Terminal emulator library
 │   │   └── xterm-addon-fit.js
@@ -157,7 +176,8 @@ ripple-ssh-wails/
 │       ├── style.css    # App styles
 │       ├── xterm.css    # Terminal styles
 │       └── fonts/       # Bundled fonts (Inter, Outfit, Fira Code)
-└── build/               # Build output
+├── .github/workflows/   # CI/CD — auto-builds and releases on version change
+└── build/               # Platform-specific build configs
 ```
 
 ---
@@ -166,11 +186,11 @@ ripple-ssh-wails/
 
 | Component | Technology |
 |-----------|------------|
-| Backend | Go 1.23 + golang.org/x/crypto + github.com/pkg/sftp |
+| Backend | Go 1.24 + golang.org/x/crypto + github.com/pkg/sftp |
 | Frontend | Vanilla HTML/CSS/JS |
 | Terminal | xterm.js with fit addon |
-| Desktop framework | Wails v2.12 |
-| WebView | Native (Edge WebView2 / WebKit / GTK) |
+| Desktop framework | Wails v3 |
+| WebView | Native (Edge WebView2 / WebKitGTK) |
 
 ---
 
