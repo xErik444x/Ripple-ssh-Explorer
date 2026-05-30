@@ -1,4 +1,6 @@
 import './style.css';
+import { Events } from '@wailsio/runtime';
+import * as App from '../bindings/ripple-ssh-wails/app';
 
 let profiles = [];
 let currentPath = '/';
@@ -66,7 +68,8 @@ async function initApp() {
 }
 
 function setupEventListeners_backend() {
-  window.runtime.EventsOn('ssh.connected', (data) => {
+  Events.On('ssh.connected', (event) => {
+    const data = event.data;
     const { host, username } = data;
     isConnected = true;
 
@@ -91,17 +94,19 @@ function setupEventListeners_backend() {
     setTimeout(() => loadDirectory(currentPath), 200);
   });
 
-  window.runtime.EventsOn('ssh.error', (data) => {
+  Events.On('ssh.error', (event) => {
+    const data = event.data;
     const { message } = data;
     showToast(`SSH Error: ${message}`, 'error');
     setDisconnectedState();
   });
 
-  window.runtime.EventsOn('ssh.disconnected', () => {
+  Events.On('ssh.disconnected', () => {
     setDisconnectedState();
   });
 
-  window.runtime.EventsOn('terminal.data', (data) => {
+  Events.On('terminal.data', (event) => {
+    const data = event.data;
     const { data: termData } = data;
     if (terminal) {
       terminal.write(termData);
@@ -109,7 +114,8 @@ function setupEventListeners_backend() {
     }
   });
 
-  window.runtime.EventsOn('sftp.progress', (data) => {
+  Events.On('sftp.progress', (event) => {
+    const data = event.data;
     const { action, transferred, total, percent } = data;
     const id = data.id || '';
     if (id && activeTransfers.has(id)) {
@@ -167,7 +173,7 @@ let terminalSettings = {
 
 async function loadTerminalSettings() {
   try {
-    const raw = await window.go.main.App.LoadSettings();
+    const raw = await App.LoadSettings();
     if (raw) {
       const data = JSON.parse(raw);
       if (data && Object.keys(data).length > 0) Object.assign(terminalSettings, data);
@@ -176,7 +182,7 @@ async function loadTerminalSettings() {
 }
 
 async function saveTerminalSettings() {
-  await window.go.main.App.SaveSettings(JSON.stringify(terminalSettings));
+  await App.SaveSettings(JSON.stringify(terminalSettings));
 }
 
 function applyTerminalSettings() {
@@ -264,7 +270,7 @@ function initTerminal() {
 
     terminal.onData((data) => {
       if (isConnected) {
-        window.go.main.App.WriteTerminal(data).catch(() => {});
+        App.WriteTerminal(data).catch(() => {});
       }
     });
 
@@ -276,7 +282,7 @@ function initTerminal() {
         if (!fitAddon || !fitAddon.fit) return;
         fitAddon.fit();
         if (isConnected && terminal) {
-          window.go.main.App.ResizeTerminal(terminal.cols, terminal.rows).catch(() => {});
+          App.ResizeTerminal(terminal.cols, terminal.rows).catch(() => {});
         }
       });
     });
@@ -302,7 +308,7 @@ function initTerminal() {
         } else if (e.key === 'v' || e.key === 'V') {
           e.preventDefault();
           navigator.clipboard.readText().then(text => {
-            if (text && isConnected) window.go.main.App.WriteTerminal(text).catch(() => {});
+            if (text && isConnected) App.WriteTerminal(text).catch(() => {});
           }).catch(() => {});
         }
       }
@@ -334,7 +340,7 @@ function setupEventListeners() {
 
   document.getElementById('btn-browse-key').addEventListener('click', async () => {
     try {
-      const selected = await window.go.main.App.ShowOpenDialog();
+      const selected = await App.ShowOpenDialog();
       if (selected && selected.length > 0) {
         document.getElementById('ssh-key-path').value = selected;
       }
@@ -343,7 +349,7 @@ function setupEventListeners() {
   });
 
   document.getElementById('btn-disconnect').addEventListener('click', () => {
-    window.go.main.App.DisconnectSSH().catch(() => {});
+    App.DisconnectSSH().catch(() => {});
   });
 
   document.getElementById('ssh-form').addEventListener('submit', (e) => {
@@ -369,7 +375,7 @@ function setupEventListeners() {
     if (folderName) {
       document.getElementById('dialog-mkdir').close();
       const folderPath = joinPath(currentPath, folderName);
-      window.go.main.App.Mkdir(folderPath).then(() => {
+      App.Mkdir(folderPath).then(() => {
         loadDirectory(currentPath);
       }).catch(err => {
         showToast(`Failed to create folder: ${err}`, 'error');
@@ -418,7 +424,7 @@ function setupEventListeners() {
   document.getElementById('ctx-term-paste').addEventListener('click', () => {
     navigator.clipboard.readText().then(text => {
       if (text && isConnected) {
-        window.go.main.App.WriteTerminal(text).catch(() => {});
+        App.WriteTerminal(text).catch(() => {});
       }
     }).catch(() => {});
     termCtx.style.display = 'none';
@@ -457,7 +463,7 @@ function setupEventListeners() {
       document.getElementById('dialog-rename').close();
       const parent = getParentPath(originalPath);
       const destPath = joinPath(parent, newName);
-      window.go.main.App.RenameFile(originalPath, destPath).then(() => {
+      App.RenameFile(originalPath, destPath).then(() => {
         loadDirectory(currentPath);
       }).catch(err => {
         showToast(`Rename failed: ${err}`, 'error');
@@ -471,7 +477,7 @@ function setupEventListeners() {
 
 function loadDirectory(path) {
   document.getElementById('sftp-file-list').innerHTML = '<div class="loading-state">Loading directory...</div>';
-  window.go.main.App.ListDirectory(path).then(files => {
+  App.ListDirectory(path).then(files => {
     if (typeof files === 'string') files = JSON.parse(files);
     currentPath = path;
     renderFileList(files);
@@ -520,7 +526,7 @@ function connectSsh() {
 
   document.getElementById('status-text').textContent = `Connecting to ${host}...`;
 
-  window.go.main.App.ConnectSSH(host, port, username, password, privateKeyText, passphrase).catch(err => {
+  App.ConnectSSH(host, port, username, password, privateKeyText, passphrase).catch(err => {
     showToast(`SSH Error: ${err}`, 'error');
     setDisconnectedState();
   });
@@ -635,7 +641,7 @@ function triggerDownload() {
 
 async function triggerFileDownload(remoteFilePath, filename) {
   try {
-    const localDest = await window.go.main.App.ShowSaveDialog(filename);
+    const localDest = await App.ShowSaveDialog(filename);
 
     if (localDest) {
       const transferId = Math.random().toString(36).substring(2, 9);
@@ -643,7 +649,7 @@ async function triggerFileDownload(remoteFilePath, filename) {
 
       showTransferStatus('Preparing Download...', 0, 'Starting stream...');
 
-      window.go.main.App.DownloadFile(remoteFilePath, localDest).then(() => {
+      App.DownloadFile(remoteFilePath, localDest).then(() => {
         activeTransfers.delete(transferId);
         showToast(`Download completed:\n${localDest}`, 'success');
         hideTransferStatus();
@@ -667,13 +673,13 @@ function openRenameDialog() {
 async function triggerDelete() {
   if (!ctxTarget) return;
 
-  const confirm = await window.go.main.App.ShowMessage(
+  const confirm = await App.ShowMessage(
     'Delete File/Folder',
     `Are you sure you want to delete this remote item?\n${ctxTarget.name}`
   );
 
   if (confirm === 'Yes') {
-    window.go.main.App.DeleteFile(ctxTarget.path, ctxTarget.isDir).then(() => {
+    App.DeleteFile(ctxTarget.path, ctxTarget.isDir).then(() => {
       loadDirectory(currentPath);
     }).catch(err => {
       showToast(`Delete failed: ${err}`, 'error');
@@ -683,7 +689,7 @@ async function triggerDelete() {
 
 async function triggerUpload() {
   try {
-    const selected = await window.go.main.App.ShowOpenDialog();
+    const selected = await App.ShowOpenDialog();
     if (selected && selected.length > 0) {
       const localFilePath = selected;
       const filename = localFilePath.split(/[/\\]/).pop();
@@ -694,7 +700,7 @@ async function triggerUpload() {
 
       showTransferStatus('Preparing Upload...', 0, 'Starting stream...');
 
-      window.go.main.App.UploadFile(localFilePath, remoteFilePath).then(() => {
+      App.UploadFile(localFilePath, remoteFilePath).then(() => {
         activeTransfers.delete(transferId);
         showToast(`Upload completed:\n${remoteFilePath}`, 'success');
         hideTransferStatus();
@@ -771,7 +777,7 @@ async function saveProfileData(name, credentials, authType) {
   }
 
   try {
-    await window.go.main.App.SaveProfiles(JSON.stringify(profiles));
+    await App.SaveProfiles(JSON.stringify(profiles));
     renderProfiles();
   } catch (err) {
   }
@@ -779,7 +785,7 @@ async function saveProfileData(name, credentials, authType) {
 
 async function loadProfiles() {
   try {
-    const raw = await window.go.main.App.LoadProfiles();
+    const raw = await App.LoadProfiles();
     profiles = raw ? JSON.parse(raw) : [];
   } catch (err) {
     profiles = [];
@@ -819,14 +825,14 @@ function renderProfiles() {
 
     item.querySelector('.btn-delete-profile').addEventListener('click', async (e) => {
       e.stopPropagation();
-      const confirm = await window.go.main.App.ShowMessage(
+      const confirm = await App.ShowMessage(
         'Delete Profile',
         `Are you sure you want to delete profile "${p.name}"?`
       );
       if (confirm === 'Yes') {
         profiles = profiles.filter(prof => prof.id !== p.id);
         try {
-          await window.go.main.App.SaveProfiles(JSON.stringify(profiles));
+          await App.SaveProfiles(JSON.stringify(profiles));
           renderProfiles();
         } catch (err) {
         }
@@ -968,9 +974,9 @@ async function triggerPreview() {
     previewDialog.setAttribute('data-remote-path', ctxTarget.path);
 
     const safeName = ctxTarget.name.replace(/[^a-zA-Z0-9._-]/g, '_');
-    const tempPath = await window.go.main.App.DownloadToTemp(ctxTarget.path, safeName);
-    const stats = await window.go.main.App.GetFileStats(tempPath);
-    const base64Data = await window.go.main.App.ReadFileAsBase64(tempPath);
+    const tempPath = await App.DownloadToTemp(ctxTarget.path, safeName);
+    const stats = await App.GetFileStats(tempPath);
+    const base64Data = await App.ReadFileAsBase64(tempPath);
 
     const detected = detectFileTypeFromName(ctxTarget.name);
     const previewData = {
@@ -1141,9 +1147,9 @@ async function savePreviewAs() {
   const remotePath = dialog.getAttribute('data-remote-path');
   if (!remotePath) return;
   try {
-    const dest = await window.go.main.App.ShowSaveDialog(filename);
+    const dest = await App.ShowSaveDialog(filename);
     if (dest) {
-      await window.go.main.App.DownloadFile(remotePath, dest);
+      await App.DownloadFile(remotePath, dest);
       showToast(`Saved to:\n${dest}`, 'success');
     }
   } catch (err) {
@@ -1157,7 +1163,7 @@ async function openPreviewWithExternalApp() {
   if (!localPath) return;
 
   try {
-    await window.go.main.App.OpenFileWithDefaultApp(localPath);
+    await App.OpenFileWithDefaultApp(localPath);
   } catch (err) {
     showToast('Could not open file with default app.', 'error');
   }
@@ -1178,7 +1184,7 @@ function cleanupPreviewResources() {
 
   const localPath = dialog.getAttribute('data-local-path');
   if (localPath && localPath.includes('ripple_preview_')) {
-    window.go.main.App.DeleteLocalFile(localPath).catch(() => {});
+    App.DeleteLocalFile(localPath).catch(() => {});
   }
 
   dialog.removeAttribute('data-local-path');

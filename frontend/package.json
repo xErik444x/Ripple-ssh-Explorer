@@ -5,9 +5,13 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "build:dev": "vite build --mode development",
     "preview": "vite preview"
   },
   "devDependencies": {
     "vite": "^3.0.7"
+  },
+  "dependencies": {
+    "@wailsio/runtime": "^3.0.0-alpha.79"
   }
 }

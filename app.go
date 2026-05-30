@@ -14,12 +14,12 @@ import (
 	"time"
 
 	"github.com/pkg/sftp"
-	wailsRuntime "github.com/wailsapp/wails/v2/pkg/runtime"
+	"github.com/wailsapp/wails/v3/pkg/application"
 	"golang.org/x/crypto/ssh"
 )
 
 type App struct {
-	ctx        context.Context
+	app      *application.App
 	sshClient  *ssh.Client
 	sftpClient *sftp.Client
 	mu         sync.Mutex
@@ -44,11 +44,12 @@ func NewApp() *App {
 	return &App{}
 }
 
-func (a *App) startup(ctx context.Context) {
-	a.ctx = ctx
+func (a *App) ServiceStartup(ctx context.Context, options application.ServiceOptions) error {
+	a.app = application.Get()
+	return nil
 }
 
-func (a *App) shutdown(ctx context.Context) {
+func (a *App) ServiceShutdown() {
 	a.DisconnectSSH()
 	if a.logFile != nil {
 		a.log("=== App shutting down ===")
@@ -150,7 +151,7 @@ func (a *App) connectSSHAsync(host, port, username, password, privateKeyText, pa
 	client, err := ssh.Dial("tcp", addr, config)
 	if err != nil {
 		a.log(fmt.Sprintf("SSH connection failed: %s", err.Error()))
-		wailsRuntime.EventsEmit(a.ctx, "ssh.error", map[string]string{
+		a.app.Event.Emit("ssh.error", map[string]string{
 			"message": fmt.Sprintf("Connection failed: %s", err.Error()),
 		})
 		return
@@ -174,7 +175,7 @@ func (a *App) connectSSHAsync(host, port, username, password, privateKeyText, pa
 	}
 
 	// Notify frontend
-	wailsRuntime.EventsEmit(a.ctx, "ssh.connected", map[string]string{
+	a.app.Event.Emit("ssh.connected", map[string]string{
 		"host":     host,
 		"username": username,
 	})
@@ -210,7 +211,7 @@ func (a *App) DisconnectSSH() error {
 		a.terminalSession = nil
 	}
 
-	wailsRuntime.EventsEmit(a.ctx, "ssh.disconnected", map[string]string{
+	a.app.Event.Emit("ssh.disconnected", map[string]string{
 		"message": "Disconnected",
 	})
 	return nil
@@ -231,7 +232,7 @@ func (a *App) startTerminal() {
 	session, err := client.NewSession()
 	if err != nil {
 		a.log(fmt.Sprintf("Terminal session failed: %s", err.Error()))
-		wailsRuntime.EventsEmit(a.ctx, "ssh.error", map[string]string{
+		a.app.Event.Emit("ssh.error", map[string]string{
 			"message": fmt.Sprintf("Shell init failed: %s", err.Error()),
 		})
 		return
@@ -278,7 +279,7 @@ func (a *App) startTerminal() {
 			n, err := stdout.Read(buf)
 			if n > 0 {
 				a.log(fmt.Sprintf("Terminal data: %d bytes", n))
-				wailsRuntime.EventsEmit(a.ctx, "terminal.data", map[string]string{
+				a.app.Event.Emit("terminal.data", map[string]string{
 					"data": string(buf[:n]),
 				})
 			}
@@ -294,7 +295,7 @@ func (a *App) startTerminal() {
 		for {
 			n, err := stderr.Read(buf)
 			if n > 0 {
-				wailsRuntime.EventsEmit(a.ctx, "terminal.data", map[string]string{
+				a.app.Event.Emit("terminal.data", map[string]string{
 					"data": string(buf[:n]),
 				})
 			}
@@ -407,7 +408,7 @@ func (a *App) DownloadFile(remotePath, localPath string) error {
 			if totalSize > 0 {
 				percent = int((transferred * 100) / totalSize)
 			}
-			wailsRuntime.EventsEmit(a.ctx, "sftp.progress", map[string]interface{}{
+			a.app.Event.Emit("sftp.progress", map[string]interface{}{
 				"action":      "download",
 				"transferred": transferred,
 				"total":       totalSize,
@@ -461,7 +462,7 @@ func (a *App) UploadFile(localPath, remotePath string) error {
 			if totalSize > 0 {
 				percent = int((transferred * 100) / totalSize)
 			}
-			wailsRuntime.EventsEmit(a.ctx, "sftp.progress", map[string]interface{}{
+			a.app.Event.Emit("sftp.progress", map[string]interface{}{
 				"action":      "upload",
 				"transferred": transferred,
 				"total":       totalSize,
@@ -520,24 +521,46 @@ func (a *App) Mkdir(path string) error {
 
 // ShowSaveDialog shows a native save file dialog
 func (a *App) ShowSaveDialog(defaultName string) (string, error) {
-	return wailsRuntime.SaveFileDialog(a.ctx, wailsRuntime.SaveDialogOptions{
-		DefaultFilename: defaultName,
-	})
+	result, err := a.app.Dialog.SaveFileWithOptions(&application.SaveFileDialogOptions{
+		Filename: defaultName,
+	}).PromptForSingleSelection()
+	if err != nil {
+		return "", err
+	}
+	return result, nil
 }
 
 // ShowOpenDialog shows a native open file dialog
 func (a *App) ShowOpenDialog() (string, error) {
-	return wailsRuntime.OpenFileDialog(a.ctx, wailsRuntime.OpenDialogOptions{})
+	result, err := a.app.Dialog.OpenFileWithOptions(&application.OpenFileDialogOptions{}).PromptForSingleSelection()
+	if err != nil {
+		return "", err
+	}
+	return result, nil
 }
 
 // ShowMessage shows a native message box
 func (a *App) ShowMessage(title, message string) string {
-	result, _ := wailsRuntime.MessageDialog(a.ctx, wailsRuntime.MessageDialogOptions{
-		Title:   title,
-		Message: message,
-		Type:    wailsRuntime.QuestionDialog,
-		Buttons: []string{"Yes", "No"},
+	var result string
+	done := make(chan struct{})
+	
+	dialog := a.app.Dialog.Question().
+		SetTitle(title).
+		SetMessage(message)
+	
+	dialog.AddButton("Yes").OnClick(func() {
+		result = "Yes"
+		close(done)
 	})
+	
+	dialog.AddButton("No").OnClick(func() {
+		result = "No"
+		close(done)
+	})
+	
+	dialog.Show()
+	
+	<-done
 	return result
 }
 
