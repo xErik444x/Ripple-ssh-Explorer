@@ -54,11 +54,11 @@ jobs:
             name: windows-amd64-native-webview2
           - os: ubuntu-latest
             platform: linux/amd64
-            tags: ""
+            tags: "webkit2gtk41"
             name: linux-amd64
           - os: ubuntu-latest
             platform: linux/amd64
-            tags: ""
+            tags: "webkit2gtk41"
             name: linux-amd64-server
             server: "true"
     runs-on: ${{ matrix.os }}
@@ -91,7 +91,7 @@ jobs:
           TAGS="${{ matrix.tags }}"
           SERVER="${{ matrix.server }}"
           if [ "$SERVER" == "true" ]; then
-            wails build -s -platform ${{ matrix.platform }}
+            wails build -s -platform ${{ matrix.platform }} -tags "$TAGS"
           elif [ -n "$TAGS" ]; then
             wails build -platform ${{ matrix.platform }} -tags "$TAGS"
           else
