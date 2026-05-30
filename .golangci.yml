@@ -1,0 +1,31 @@
+linters:
+  enable:
+    - errcheck
+    - gosimple
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - misspell
+    - revive
+    - gosec
+    - nakedret
+
+issues:
+  exclude-use-default: false
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  exclude:
+    - G106  # InsecureIgnoreHostKey — temporary; known_hosts planned
+    - G304  # file inclusion via variable (intentional — user-chosen paths)
+  exclude-files:
+    - node_modules/
+
+linters-settings:
+  gosec:
+    excludes:
+      - G204
+  revive:
+    rules:
+      - name: exported
+        disabled: true

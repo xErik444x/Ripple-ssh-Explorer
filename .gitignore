@@ -12,6 +12,10 @@ frontend/node_modules/
 *.log
 *.syso
 
+# Linter cache
+.golangci.yml.tmp
+.golangci.json
+
 # Task runner
 .task/
 

@@ -2,12 +2,14 @@ package app
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 )
 
+// ListDirectory returns a JSON array of FileEntry for the given remote path.
 func (a *App) ListDirectory(path string) (string, error) {
 	a.log(fmt.Sprintf("ListDirectory: %s", path))
 	a.mu.Lock()
@@ -43,10 +45,14 @@ func (a *App) ListDirectory(path string) (string, error) {
 	}
 
 	a.log(fmt.Sprintf("ListDirectory: found %d files", len(files)))
-	result, _ := json.Marshal(files)
+	result, err := json.Marshal(files)
+	if err != nil {
+		return "[]", fmt.Errorf("marshal error: %w", err)
+	}
 	return string(result), nil
 }
 
+// DownloadFile streams a remote file to a local path with progress events.
 func (a *App) DownloadFile(remotePath, localPath string) error {
 	a.mu.Lock()
 	client := a.sftpClient
@@ -56,13 +62,19 @@ func (a *App) DownloadFile(remotePath, localPath string) error {
 		return fmt.Errorf("SFTP not connected")
 	}
 
-	os.MkdirAll(filepath.Dir(localPath), 0755)
+	if err := os.MkdirAll(filepath.Dir(localPath), 0700); err != nil {
+		return fmt.Errorf("mkdir %s: %w", filepath.Dir(localPath), err)
+	}
 
 	remoteFile, err := client.Open(remotePath)
 	if err != nil {
 		return err
 	}
-	defer remoteFile.Close()
+	defer func() {
+		if cerr := remoteFile.Close(); cerr != nil {
+			a.log(fmt.Sprintf("remoteFile close error: %v", cerr))
+		}
+	}()
 
 	stat, err := remoteFile.Stat()
 	if err != nil {
@@ -74,14 +86,20 @@ func (a *App) DownloadFile(remotePath, localPath string) error {
 	if err != nil {
 		return err
 	}
-	defer localFile.Close()
+	defer func() {
+		if cerr := localFile.Close(); cerr != nil {
+			a.log(fmt.Sprintf("localFile close error: %v", cerr))
+		}
+	}()
 
 	buf := make([]byte, 32*1024)
 	var transferred int64
 	for {
 		n, readErr := remoteFile.Read(buf)
 		if n > 0 {
-			localFile.Write(buf[:n])
+			if _, werr := localFile.Write(buf[:n]); werr != nil {
+				return fmt.Errorf("write error: %w", werr)
+			}
 			transferred += int64(n)
 			percent := 0
 			if totalSize > 0 {
@@ -94,14 +112,18 @@ func (a *App) DownloadFile(remotePath, localPath string) error {
 				"percent":     percent,
 			})
 		}
-		if readErr != nil {
+		if errors.Is(readErr, io.EOF) {
 			break
+		}
+		if readErr != nil {
+			return fmt.Errorf("read error: %w", readErr)
 		}
 	}
 
 	return nil
 }
 
+// UploadFile streams a local file to a remote path with progress events.
 func (a *App) UploadFile(localPath, remotePath string) error {
 	a.mu.Lock()
 	client := a.sftpClient
@@ -115,7 +137,11 @@ func (a *App) UploadFile(localPath, remotePath string) error {
 	if err != nil {
 		return err
 	}
-	defer localFile.Close()
+	defer func() {
+		if cerr := localFile.Close(); cerr != nil {
+			a.log(fmt.Sprintf("localFile close error: %v", cerr))
+		}
+	}()
 
 	stat, err := localFile.Stat()
 	if err != nil {
@@ -127,14 +153,20 @@ func (a *App) UploadFile(localPath, remotePath string) error {
 	if err != nil {
 		return err
 	}
-	defer remoteFile.Close()
+	defer func() {
+		if cerr := remoteFile.Close(); cerr != nil {
+			a.log(fmt.Sprintf("remoteFile close error: %v", cerr))
+		}
+	}()
 
 	buf := make([]byte, 32*1024)
 	var transferred int64
 	for {
 		n, readErr := localFile.Read(buf)
 		if n > 0 {
-			remoteFile.Write(buf[:n])
+			if _, werr := remoteFile.Write(buf[:n]); werr != nil {
+				return fmt.Errorf("write error: %w", werr)
+			}
 			transferred += int64(n)
 			percent := 0
 			if totalSize > 0 {
@@ -147,14 +179,18 @@ func (a *App) UploadFile(localPath, remotePath string) error {
 				"percent":     percent,
 			})
 		}
-		if readErr != nil {
+		if errors.Is(readErr, io.EOF) {
 			break
+		}
+		if readErr != nil {
+			return fmt.Errorf("read error: %w", readErr)
 		}
 	}
 
 	return nil
 }
 
+// DeleteFile removes a remote file or directory.
 func (a *App) DeleteFile(path string, isDir bool) error {
 	a.mu.Lock()
 	client := a.sftpClient
@@ -170,6 +206,7 @@ func (a *App) DeleteFile(path string, isDir bool) error {
 	return client.Remove(path)
 }
 
+// RenameFile moves or renames a remote file.
 func (a *App) RenameFile(src, dest string) error {
 	a.mu.Lock()
 	client := a.sftpClient
@@ -182,6 +219,7 @@ func (a *App) RenameFile(src, dest string) error {
 	return client.Rename(src, dest)
 }
 
+// Mkdir creates a remote directory.
 func (a *App) Mkdir(path string) error {
 	a.mu.Lock()
 	client := a.sftpClient
@@ -194,6 +232,7 @@ func (a *App) Mkdir(path string) error {
 	return client.Mkdir(path)
 }
 
+// DownloadToTemp downloads a remote file to a temp directory for preview.
 func (a *App) DownloadToTemp(remotePath, safeName string) (string, error) {
 	a.mu.Lock()
 	client := a.sftpClient
@@ -210,17 +249,27 @@ func (a *App) DownloadToTemp(remotePath, safeName string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer remoteFile.Close()
+	defer func() {
+		if cerr := remoteFile.Close(); cerr != nil {
+			a.log(fmt.Sprintf("remoteFile close: %v", cerr))
+		}
+	}()
 
 	localFile, err := os.Create(localPath)
 	if err != nil {
 		return "", err
 	}
-	defer localFile.Close()
+	defer func() {
+		if cerr := localFile.Close(); cerr != nil {
+			a.log(fmt.Sprintf("localFile close: %v", cerr))
+		}
+	}()
 
 	_, err = io.Copy(localFile, remoteFile)
 	if err != nil {
-		os.Remove(localPath)
+		if rerr := os.Remove(localPath); rerr != nil {
+			a.log(fmt.Sprintf("cleanup remove error: %v", rerr))
+		}
 		return "", err
 	}
 

@@ -41,9 +41,9 @@ function showToast(message, type = 'info', duration = 4000) {
 }
 
 let ctxTarget = null;
-let activeTransfers = new Set();
-let previewTransfers = {};
-let previewCancelled = {};
+const activeTransfers = new Set();
+const previewTransfers = {};
+const previewCancelled = {};
 
 const ICONS = {
   folder: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>',
@@ -165,7 +165,7 @@ function setDisconnectedState() {
   }
 }
 
-let terminalSettings = {
+const terminalSettings = {
   fontSize: 14,
   lineHeight: 1.5,
   fontFamily: 'Fira Code'
@@ -178,7 +178,7 @@ async function loadTerminalSettings() {
       const data = JSON.parse(raw);
       if (data && Object.keys(data).length > 0) Object.assign(terminalSettings, data);
     }
-  } catch (e) { /* use defaults */ }
+    } catch (e) { console.warn('[Ripple] Failed to load settings:', e); }
 }
 
 async function saveTerminalSettings() {
@@ -262,7 +262,7 @@ function initTerminal() {
     term.open(container);
     terminal = term;
 
-    fitAddon = new FitAddon.FitAddon ? new FitAddon.FitAddon() : new FitAddon();
+    fitAddon = typeof FitAddon.FitAddon !== 'undefined' ? new FitAddon.FitAddon() : new FitAddon();
     if (fitAddon.fit) {
       terminal.loadAddon(fitAddon);
       requestAnimationFrame(() => fitAddon.fit());
@@ -270,7 +270,7 @@ function initTerminal() {
 
     terminal.onData((data) => {
       if (isConnected) {
-        App.WriteTerminal(data).catch(() => {});
+        App.WriteTerminal(data).catch(err => console.warn('[Ripple] WriteTerminal:', err));
       }
     });
 
@@ -282,7 +282,7 @@ function initTerminal() {
         if (!fitAddon || !fitAddon.fit) return;
         fitAddon.fit();
         if (isConnected && terminal) {
-          App.ResizeTerminal(terminal.cols, terminal.rows).catch(() => {});
+          App.ResizeTerminal(terminal.cols, terminal.rows).catch(err => console.warn('[Ripple] ResizeTerminal:', err));
         }
       });
     });
@@ -304,12 +304,12 @@ function initTerminal() {
         if (e.key === 'c' || e.key === 'C') {
           e.preventDefault();
           const text = terminal.getSelection();
-          if (text) navigator.clipboard.writeText(text).catch(() => {});
+          if (text) navigator.clipboard.writeText(text).catch(err => console.warn('[Ripple] Clipboard write:', err));
         } else if (e.key === 'v' || e.key === 'V') {
           e.preventDefault();
           navigator.clipboard.readText().then(text => {
-            if (text && isConnected) App.WriteTerminal(text).catch(() => {});
-          }).catch(() => {});
+            if (text && isConnected) App.WriteTerminal(text).catch(err => console.warn('[Ripple] WriteTerminal:', err));
+          }).catch(err => console.warn('[Ripple] Clipboard read:', err));
         }
       }
     });
@@ -321,21 +321,21 @@ function initTerminal() {
 function setupEventListeners() {
   const authBtnPwd = document.getElementById('auth-btn-pwd');
   const authBtnKey = document.getElementById('auth-btn-key');
-  const pwdGroup = document.getElementById('auth-password-group');
-  const keyGroup = document.getElementById('auth-key-group');
+  const _pwdGroup = document.getElementById('auth-password-group');
+  const _keyGroup = document.getElementById('auth-key-group');
 
   authBtnPwd.addEventListener('click', () => {
     authBtnPwd.classList.add('active');
     authBtnKey.classList.remove('active');
-    pwdGroup.classList.remove('hidden');
-    keyGroup.classList.add('hidden');
+    _pwdGroup.classList.remove('hidden');
+    _keyGroup.classList.add('hidden');
   });
 
   authBtnKey.addEventListener('click', () => {
     authBtnKey.classList.add('active');
     authBtnPwd.classList.remove('active');
-    keyGroup.classList.remove('hidden');
-    pwdGroup.classList.add('hidden');
+    _keyGroup.classList.remove('hidden');
+    _pwdGroup.classList.add('hidden');
   });
 
   document.getElementById('btn-browse-key').addEventListener('click', async () => {
@@ -345,11 +345,12 @@ function setupEventListeners() {
         document.getElementById('ssh-key-path').value = selected;
       }
     } catch (err) {
+      console.warn('[Ripple] Browse key dialog:', err);
     }
   });
 
   document.getElementById('btn-disconnect').addEventListener('click', () => {
-    App.DisconnectSSH().catch(() => {});
+    App.DisconnectSSH().catch(err => console.warn('[Ripple] Disconnect:', err));
   });
 
   document.getElementById('ssh-form').addEventListener('submit', (e) => {
@@ -416,7 +417,7 @@ function setupEventListeners() {
   document.getElementById('ctx-term-copy').addEventListener('click', () => {
     const text = terminal ? terminal.getSelection() : '';
     if (text) {
-      navigator.clipboard.writeText(text).catch(() => {});
+      navigator.clipboard.writeText(text).catch(err => console.warn('[Ripple] Clipboard write:', err));
     }
     termCtx.style.display = 'none';
   });
@@ -424,9 +425,9 @@ function setupEventListeners() {
   document.getElementById('ctx-term-paste').addEventListener('click', () => {
     navigator.clipboard.readText().then(text => {
       if (text && isConnected) {
-        App.WriteTerminal(text).catch(() => {});
+        App.WriteTerminal(text).catch(err => console.warn('[Ripple] WriteTerminal:', err));
       }
-    }).catch(() => {});
+    }).catch(err => console.warn('[Ripple] Clipboard read:', err));
     termCtx.style.display = 'none';
   });
 
@@ -620,7 +621,7 @@ function renderBreadcrumbs(pathStr) {
   let html = `<span class="crumb" data-path="/">/</span>`;
   let accumPath = '';
 
-  parts.forEach((part, index) => {
+  parts.forEach((part, _index) => {
     accumPath += '/' + part;
     html += ` <span style="color: var(--text-muted)">/</span> <span class="crumb" data-path="${escapeHtml(accumPath)}">${escapeHtml(part)}</span>`;
   });
@@ -660,6 +661,7 @@ async function triggerFileDownload(remoteFilePath, filename) {
       });
     }
   } catch (err) {
+    console.warn('[Ripple] Download cancelled:', err);
   }
 }
 
@@ -712,6 +714,7 @@ async function triggerUpload() {
       });
     }
   } catch (err) {
+    console.warn('[Ripple] Upload cancelled:', err);
   }
 }
 
@@ -780,6 +783,7 @@ async function saveProfileData(name, credentials, authType) {
     await App.SaveProfiles(JSON.stringify(profiles));
     renderProfiles();
   } catch (err) {
+    console.warn('[Ripple] Save profiles error:', err);
   }
 }
 
@@ -787,7 +791,7 @@ async function loadProfiles() {
   try {
     const raw = await App.LoadProfiles();
     profiles = raw ? JSON.parse(raw) : [];
-  } catch (err) {
+  } catch {
     profiles = [];
   }
   renderProfiles();
@@ -831,11 +835,12 @@ function renderProfiles() {
       );
       if (confirm === 'Yes') {
         profiles = profiles.filter(prof => prof.id !== p.id);
-        try {
-          await App.SaveProfiles(JSON.stringify(profiles));
-          renderProfiles();
-        } catch (err) {
-        }
+          try {
+            await App.SaveProfiles(JSON.stringify(profiles));
+            renderProfiles();
+          } catch (err) {
+            console.warn('[Ripple] Delete profile save error:', err);
+          }
       }
     });
 
@@ -852,8 +857,6 @@ function loadProfileIntoForm(p) {
 
   const authBtnPwd = document.getElementById('auth-btn-pwd');
   const authBtnKey = document.getElementById('auth-btn-key');
-  const pwdGroup = document.getElementById('auth-password-group');
-  const keyGroup = document.getElementById('auth-key-group');
 
   if (p.authType === 'password') {
     authBtnPwd.click();
@@ -944,25 +947,7 @@ function detectFileTypeFromName(filename) {
   return { category: 'unsupported', mime: 'application/octet-stream' };
 }
 
-function detectByMagicBytes(bytes) {
-  if (bytes.length < 4) return null;
-  if (bytes[0]===0x89 && bytes[1]===0x50 && bytes[2]===0x4E && bytes[3]===0x47) return { category: 'image', mime: 'image/png' };
-  if (bytes[0]===0xFF && bytes[1]===0xD8 && bytes[2]===0xFF) return { category: 'image', mime: 'image/jpeg' };
-  if (bytes[0]===0x47 && bytes[1]===0x49 && bytes[2]===0x46) return { category: 'image', mime: 'image/gif' };
-  if (bytes[0]===0x52 && bytes[1]===0x49 && bytes[2]===0x46 && bytes[3]===0x46 && bytes.length>=12 && bytes[8]===0x57 && bytes[9]===0x45 && bytes[10]===0x42 && bytes[11]===0x50) return { category: 'image', mime: 'image/webp' };
-  if (bytes[0]===0x25 && bytes[1]===0x50 && bytes[2]===0x44 && bytes[3]===0x46) return { category: 'pdf', mime: 'application/pdf' };
-  if (bytes[4]===0x66 && bytes[5]===0x74 && bytes[6]===0x79 && bytes[7]===0x70) return { category: 'video', mime: 'video/mp4' };
-  if (bytes[0]===0x50 && bytes[1]===0x4B && bytes[2]===0x03 && bytes[3]===0x04) return null;
-  return null;
-}
-
-function isPrintableText(str) {
-  const sample = str.slice(0, 4096);
-  const nullCount = (sample.match(/\0/g) || []).length;
-  if (nullCount > 0) return false;
-  const printable = /^[\t\n\r\x20-\x7E\u00A0-\uFFFF]*$/;
-  return printable.test(sample);
-}
+// detectByMagicBytes and isPrintableText are reserved for future content-based detection
 
 async function triggerPreview() {
   if (!ctxTarget || ctxTarget.isDir) return;
@@ -1164,7 +1149,7 @@ async function openPreviewWithExternalApp() {
 
   try {
     await App.OpenFileWithDefaultApp(localPath);
-  } catch (err) {
+  } catch {
     showToast('Could not open file with default app.', 'error');
   }
   dialog.close();
@@ -1184,7 +1169,7 @@ function cleanupPreviewResources() {
 
   const localPath = dialog.getAttribute('data-local-path');
   if (localPath && localPath.includes('ripple_preview_')) {
-    App.DeleteLocalFile(localPath).catch(() => {});
+    App.DeleteLocalFile(localPath).catch(err => console.warn('[Ripple] Cleanup delete:', err));
   }
 
   dialog.removeAttribute('data-local-path');

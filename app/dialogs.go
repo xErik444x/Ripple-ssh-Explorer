@@ -1,9 +1,12 @@
 package app
 
 import (
+	"time"
+
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
+// ShowSaveDialog opens a native save file dialog.
 func (a *App) ShowSaveDialog(defaultName string) (string, error) {
 	result, err := a.app.Dialog.SaveFileWithOptions(&application.SaveFileDialogOptions{
 		Filename: defaultName,
@@ -14,6 +17,7 @@ func (a *App) ShowSaveDialog(defaultName string) (string, error) {
 	return result, nil
 }
 
+// ShowOpenDialog opens a native file open dialog.
 func (a *App) ShowOpenDialog() (string, error) {
 	result, err := a.app.Dialog.OpenFileWithOptions(&application.OpenFileDialogOptions{}).PromptForSingleSelection()
 	if err != nil {
@@ -22,6 +26,8 @@ func (a *App) ShowOpenDialog() (string, error) {
 	return result, nil
 }
 
+// ShowMessage shows a native dialog with Yes/No buttons and returns the choice.
+// Returns "No" if the dialog is dismissed or times out after 5 minutes.
 func (a *App) ShowMessage(title, message string) string {
 	var result string
 	done := make(chan struct{})
@@ -42,6 +48,11 @@ func (a *App) ShowMessage(title, message string) string {
 
 	dialog.Show()
 
-	<-done
+	select {
+	case <-done:
+	case <-time.After(5 * time.Minute):
+		result = "No"
+	}
+
 	return result
 }
