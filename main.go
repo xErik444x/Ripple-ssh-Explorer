@@ -1,5 +1,3 @@
-//go:build !server
-
 // Ripple SSH — SSH & SFTP Client
 // Made with ❤️ by Erik Schwerdt
 package main
@@ -23,6 +21,10 @@ func main() {
 		},
 		Assets: application.AssetOptions{
 			Handler: application.AssetFileServerFS(assets),
+		},
+		Server: application.ServerOptions{
+			Host: "localhost",
+			Port: 8080,
 		},
 	})
 
