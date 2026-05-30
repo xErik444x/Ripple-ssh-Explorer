@@ -4,18 +4,23 @@ package main
 
 import (
 	"embed"
+	"flag"
 	"os"
 	"path/filepath"
 
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
+	"github.com/wailsapp/wails/v2/pkg/options/server"
 )
 
 //go:embed all:frontend/dist
 var assets embed.FS
 
 func main() {
+	serverMode := flag.Bool("server", false, "Run in server mode (opens in browser instead of native window)")
+	flag.Parse()
+
 	app := NewApp()
 
 	// Setup log file with absolute path
@@ -29,7 +34,7 @@ func main() {
 		app.log("=== Ripple SSH started ===")
 	}
 
-	err := wails.Run(&options.App{
+	appOptions := &options.App{
 		Title:     "Ripple SSH",
 		Width:     1100,
 		Height:    700,
@@ -44,7 +49,13 @@ func main() {
 		Bind: []interface{}{
 			app,
 		},
-	})
+	}
+
+	if *serverMode {
+		appOptions.Server = &server.Options{}
+	}
+
+	err := wails.Run(appOptions)
 
 	if err != nil {
 		println("Error:", err.Error())

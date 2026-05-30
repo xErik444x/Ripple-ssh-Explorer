@@ -56,6 +56,10 @@ jobs:
             platform: linux/amd64
             tags: "webkit2gtk41"
             name: linux-amd64
+          - os: ubuntu-22.04
+            platform: linux/amd64
+            tags: "webkit2gtk41"
+            name: linux-amd64-server
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
@@ -131,6 +135,7 @@ jobs:
           | `ripple-ssh-windows-amd64.exe` | Windows | Standard build with embedded WebView2 loader. Recommended for most users. |
           | `ripple-ssh-windows-amd64-native-webview2.exe` | Windows | Build using the **native WebView2 loader** (`-tags native_webview2loader`). Smaller binary size; requires WebView2 Runtime already installed on the system. |
           | `ripple-ssh-linux-amd64` | Linux | Standard desktop build using **WebKitGTK**. Native window with embedded webview. |
+          | `ripple-ssh-linux-amd64-server` | Linux | Same binary as above. Run with `--server` flag to open the app in your default web browser instead of a native window. |
 
           ---
           EOF
