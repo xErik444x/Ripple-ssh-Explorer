@@ -1,12 +1,11 @@
-//go:build !server
+//go:build server
 
-// Ripple SSH — SSH & SFTP Client
+// Ripple SSH — SSH & SFTP Client (Server Mode)
 // Made with ❤️ by Erik Schwerdt
 package main
 
 import (
 	"embed"
-	"flag"
 	"os"
 	"path/filepath"
 
@@ -20,9 +19,6 @@ import (
 var assets embed.FS
 
 func main() {
-	serverMode := flag.Bool("server", false, "Run in server mode (opens in browser instead of native window)")
-	flag.Parse()
-
 	app := NewApp()
 
 	// Setup log file with absolute path
@@ -33,7 +29,7 @@ func main() {
 	logFile, _ := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
 	if logFile != nil {
 		app.logFile = logFile
-		app.log("=== Ripple SSH started ===")
+		app.log("=== Ripple SSH started (server mode) ===")
 	}
 
 	appOptions := &options.App{
@@ -51,10 +47,7 @@ func main() {
 		Bind: []interface{}{
 			app,
 		},
-	}
-
-	if *serverMode {
-		appOptions.Server = &server.Options{}
+		Server: &server.Options{},
 	}
 
 	err := wails.Run(appOptions)
