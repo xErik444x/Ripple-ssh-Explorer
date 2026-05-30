@@ -52,14 +52,16 @@ jobs:
             platform: windows/amd64
             tags: "native_webview2loader"
             name: windows-amd64-native-webview2
-          - os: ubuntu-22.04
+          - os: ubuntu-24.04  # 22.04 does not ship libwebkitgtk-6.0-dev (required by wails3 CLI at install time)
             platform: linux/amd64
             tags: "webkit2gtk41"
             name: linux-amd64
-          - os: ubuntu-22.04
+            server: false
+          - os: ubuntu-24.04  # 22.04 does not ship libwebkitgtk-6.0-dev (required by wails3 CLI at install time)
             platform: linux/amd64
-            tags: "webkit2gtk41 server"
+            tags: ""
             name: linux-amd64-server
+            server: true
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
@@ -75,36 +77,69 @@ jobs:
         with:
           node-version: 20
 
-      - name: Install Wails
-        run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
-
+      # Must run BEFORE "Install Wails" — `go install` compiles CGo code that
+      # links against gtk4 + webkitgtk-6.0 even when you later build with -tags gtk3.
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libwebkit2gtk-4.0-dev
+          sudo apt-get install -y \
+            libgtk-3-dev \
+            libgtk-4-dev \
+            libwebkit2gtk-4.1-dev \
+            libwebkitgtk-6.0-dev
 
-      - name: Build
+      - name: Install Wails
+        run: go install github.com/wailsapp/wails/v3/cmd/wails3@latest
+
+      - name: Build (Windows)
+        if: runner.os == 'Windows'
         shell: bash
         run: |
           TAGS="${{ matrix.tags }}"
           if [ -n "$TAGS" ]; then
-            wails build -platform ${{ matrix.platform }} -tags "$TAGS"
+            wails3 build -tags "$TAGS"
           else
-            wails build -platform ${{ matrix.platform }}
+            wails3 build
+          fi
+
+      - name: Build (Linux desktop)
+        if: runner.os == 'Linux' && matrix.server == false
+        shell: bash
+        run: |
+          TAGS="${{ matrix.tags }}"
+          if [ -n "$TAGS" ]; then
+            wails3 build -tags "gtk3 $TAGS"
+          else
+            wails3 build -tags "gtk3"
+          fi
+
+      - name: Build (Linux server)
+        if: runner.os == 'Linux' && matrix.server == true
+        shell: bash
+        run: |
+          TAGS="${{ matrix.tags }}"
+          if [ -n "$TAGS" ]; then
+            wails3 task build:server BUILD_FLAGS="-tags gtk3 $TAGS"
+          else
+            wails3 task build:server BUILD_FLAGS="-tags gtk3"
           fi
 
       - name: Rename output (Windows)
         if: runner.os == 'Windows'
         run: |
           mkdir -p dist
-          cp build/bin/ripple-ssh.exe dist/ripple-ssh-${{ matrix.name }}.exe
+          cp bin/ripple-ssh.exe dist/ripple-ssh-${{ matrix.name }}.exe
 
       - name: Rename output (Linux)
         if: runner.os == 'Linux'
         run: |
           mkdir -p dist
-          cp build/bin/ripple-ssh dist/ripple-ssh-${{ matrix.name }}
+          if [ "${{ matrix.server }}" == "true" ]; then
+            cp bin/ripple-ssh-server dist/ripple-ssh-${{ matrix.name }}
+          else
+            cp bin/ripple-ssh dist/ripple-ssh-${{ matrix.name }}
+          fi
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -135,7 +170,7 @@ jobs:
           | `ripple-ssh-windows-amd64.exe` | Windows | Standard build with embedded WebView2 loader. Recommended for most users. |
           | `ripple-ssh-windows-amd64-native-webview2.exe` | Windows | Build using the **native WebView2 loader** (`-tags native_webview2loader`). Smaller binary size; requires WebView2 Runtime already installed on the system. |
           | `ripple-ssh-linux-amd64` | Linux | Standard desktop build using **WebKitGTK**. Native window with embedded webview. |
-          | `ripple-ssh-linux-amd64-server` | Linux | **Server mode** (opens automatically in your default web browser). No flags needed, just double-click to run. |
+          | `ripple-ssh-linux-amd64-server` | Linux | **Server mode** (HTTP server, no GUI). Run with `./ripple-ssh-linux-amd64-server` and open `http://localhost:8080` in your browser. Useful for remote access or headless environments. |
 
           ---
           EOF
