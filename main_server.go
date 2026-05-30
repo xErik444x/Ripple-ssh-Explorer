@@ -27,7 +27,7 @@ func main() {
 		Assets: application.AssetOptions{
 			Handler: application.AssetFileServerFS(assets),
 		},
-		Server: &application.ServerOptions{
+		Server: application.ServerOptions{
 			Port: 8080,
 		},
 	})
