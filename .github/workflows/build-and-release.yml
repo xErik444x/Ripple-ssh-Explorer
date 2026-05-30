@@ -56,11 +56,6 @@ jobs:
             platform: linux/amd64
             tags: "webkit2gtk41"
             name: linux-amd64
-          - os: ubuntu-22.04
-            platform: linux/amd64
-            tags: "webkit2gtk41"
-            name: linux-amd64-server
-            server: "true"
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
@@ -89,10 +84,7 @@ jobs:
         shell: bash
         run: |
           TAGS="${{ matrix.tags }}"
-          SERVER="${{ matrix.server }}"
-          if [ "$SERVER" == "true" ]; then
-            wails build -s -platform ${{ matrix.platform }} -tags "$TAGS"
-          elif [ -n "$TAGS" ]; then
+          if [ -n "$TAGS" ]; then
             wails build -platform ${{ matrix.platform }} -tags "$TAGS"
           else
             wails build -platform ${{ matrix.platform }}
@@ -139,7 +131,6 @@ jobs:
           | `ripple-ssh-windows-amd64.exe` | Windows | Standard build with embedded WebView2 loader. Recommended for most users. |
           | `ripple-ssh-windows-amd64-native-webview2.exe` | Windows | Build using the **native WebView2 loader** (`-tags native_webview2loader`). Smaller binary size; requires WebView2 Runtime already installed on the system. |
           | `ripple-ssh-linux-amd64` | Linux | Standard desktop build using **WebKitGTK**. Native window with embedded webview. |
-          | `ripple-ssh-linux-amd64-server` | Linux | **Server mode** (`wails build -s`). Runs a local server and opens the app in your default web browser. Useful if you prefer to avoid WebKitGTK dependencies or want to use your own browser. |
 
           ---
           EOF
