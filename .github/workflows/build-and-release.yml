@@ -48,10 +48,6 @@ jobs:
             platform: windows/amd64
             tags: ""
             name: windows-amd64
-          - os: windows-latest
-            platform: windows/amd64
-            tags: "native_webview2loader"
-            name: windows-amd64-native-webview2
           - os: ubuntu-24.04  # 22.04 does not ship libwebkitgtk-6.0-dev (required by wails3 CLI at install time)
             platform: linux/amd64
             tags: "webkit2gtk41"
@@ -91,36 +87,6 @@ jobs:
 
       - name: Install Wails
         run: go install github.com/wailsapp/wails/v3/cmd/wails3@latest
-
-      - name: Fetch WebView2Loader.dll (native_webview2loader build)
-        if: runner.os == 'Windows' && matrix.tags == 'native_webview2loader'
-        shell: pwsh
-        run: |
-          # The wails/webview2 Go module uses //go:embed x64/WebView2Loader.dll but
-          # the DLL is absent from the module proxy zip — it is a Git LFS blob that
-          # proxy.golang.org never fetches. Download it from Microsoft's NuGet package
-          # and inject it into the module cache where the embed directive expects it.
-          Add-Type -AssemblyName System.IO.Compression.FileSystem
-
-          # Populate the module cache so the directory tree exists
-          go mod download github.com/wailsapp/wails/webview2
-
-          $modCache = (go env GOMODCACHE).Trim()
-          $dllDir = "$modCache\github.com\wailsapp\wails\webview2@v1.0.24\webviewloader\x64"
-          New-Item -ItemType Directory -Force -Path $dllDir | Out-Null
-          # Module cache entries are read-only; grant write access for this directory
-          icacls $dllDir /grant "Everyone:(OI)(CI)F" /q | Out-Null
-
-          # NuGet packages are zip files — download and extract only the loader DLL
-          $pkg = "$env:TEMP\webview2.nupkg"
-          Invoke-WebRequest -Uri "https://www.nuget.org/api/v2/package/Microsoft.Web.WebView2" -OutFile $pkg
-
-          $zip   = [System.IO.Compression.ZipFile]::OpenRead($pkg)
-          $entry = $zip.Entries | Where-Object { $_.FullName -eq "runtimes/win-x64/native/WebView2Loader.dll" }
-          if (-not $entry) { throw "WebView2Loader.dll not found in NuGet package" }
-          [System.IO.Compression.ZipFileExtensions]::ExtractToFile($entry, "$dllDir\WebView2Loader.dll", $true)
-          $zip.Dispose()
-          Write-Host "Placed WebView2Loader.dll at $dllDir"
 
       - name: Build (Windows)
         if: runner.os == 'Windows'
@@ -202,7 +168,6 @@ jobs:
           | File | Platform | Description |
           |------|----------|-------------|
           | `ripple-ssh-windows-amd64.exe` | Windows | Standard build with embedded WebView2 loader. Recommended for most users. |
-          | `ripple-ssh-windows-amd64-native-webview2.exe` | Windows | Build using the **native WebView2 loader** (`-tags native_webview2loader`). Smaller binary size; requires WebView2 Runtime already installed on the system. |
           | `ripple-ssh-linux-amd64` | Linux | Standard desktop build using **WebKitGTK**. Native window with embedded webview. |
           | `ripple-ssh-linux-amd64-server` | Linux | **Server mode** (HTTP server, no GUI). Run with `./ripple-ssh-linux-amd64-server` and open `http://localhost:8080` in your browser. Useful for remote access or headless environments. |
 
