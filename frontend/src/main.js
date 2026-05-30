@@ -1,6 +1,6 @@
 import './style.css';
 import { Events } from '@wailsio/runtime';
-import * as App from '../bindings/ripple-ssh-wails/app';
+import * as App from '../bindings/ripple-ssh-wails/app/app';
 
 let profiles = [];
 let currentPath = '/';

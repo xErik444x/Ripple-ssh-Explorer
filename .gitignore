@@ -1,4 +1,5 @@
 # Build output
+bin/
 build/bin/
 frontend/dist/
 
@@ -9,6 +10,10 @@ frontend/node_modules/
 # Root build artifacts
 *.exe
 *.log
+*.syso
+
+# Task runner
+.task/
 
 # IDE
 .vscode/

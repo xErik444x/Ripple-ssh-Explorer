@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"ripple-ssh-wails/app"
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
@@ -17,7 +18,7 @@ func main() {
 	app := application.New(application.Options{
 		Name: "Ripple SSH",
 		Services: []application.Service{
-			application.NewService(NewApp()),
+			application.NewService(app.NewApp()),
 		},
 		Assets: application.AssetOptions{
 			Handler: application.AssetFileServerFS(assets),

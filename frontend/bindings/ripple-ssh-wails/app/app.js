@@ -7,7 +7,6 @@
 import { Call as $Call, CancellablePromise as $CancellablePromise, Create as $Create } from "@wailsio/runtime";
 
 /**
- * ConnectSSH connects to a remote SSH server (non-blocking)
  * @param {string} host
  * @param {string} port
  * @param {string} username
@@ -17,213 +16,190 @@ import { Call as $Call, CancellablePromise as $CancellablePromise, Create as $Cr
  * @returns {$CancellablePromise<void>}
  */
 export function ConnectSSH(host, port, username, password, privateKeyText, passphrase) {
-    return $Call.ByID(2333793685, host, port, username, password, privateKeyText, passphrase);
+    return $Call.ByID(2974803588, host, port, username, password, privateKeyText, passphrase);
 }
 
 /**
- * DeleteFile removes a remote file or directory
  * @param {string} path
  * @param {boolean} isDir
  * @returns {$CancellablePromise<void>}
  */
 export function DeleteFile(path, isDir) {
-    return $Call.ByID(2962294020, path, isDir);
+    return $Call.ByID(3253734293, path, isDir);
 }
 
 /**
- * DeleteLocalFile removes a local file
  * @param {string} path
  * @returns {$CancellablePromise<void>}
  */
 export function DeleteLocalFile(path) {
-    return $Call.ByID(2913563327, path);
+    return $Call.ByID(3211582508, path);
 }
 
 /**
- * DisconnectSSH closes the SSH connection
  * @returns {$CancellablePromise<void>}
  */
 export function DisconnectSSH() {
-    return $Call.ByID(3156771571);
+    return $Call.ByID(1240619328);
 }
 
 /**
- * DownloadFile downloads a remote file to local path
  * @param {string} remotePath
  * @param {string} localPath
  * @returns {$CancellablePromise<void>}
  */
 export function DownloadFile(remotePath, localPath) {
-    return $Call.ByID(764734343, remotePath, localPath);
+    return $Call.ByID(3477154054, remotePath, localPath);
 }
 
 /**
- * DownloadToTemp downloads a remote file to a temp path and returns the local path
  * @param {string} remotePath
  * @param {string} safeName
  * @returns {$CancellablePromise<string>}
  */
 export function DownloadToTemp(remotePath, safeName) {
-    return $Call.ByID(2023961078, remotePath, safeName);
+    return $Call.ByID(1152115075, remotePath, safeName);
 }
 
 /**
- * GetConfigDir returns the OS config directory for persistent storage
  * @returns {$CancellablePromise<string>}
  */
 export function GetConfigDir() {
-    return $Call.ByID(4055022444);
+    return $Call.ByID(2375802737);
 }
 
 /**
- * GetFileStats returns file size for a local path
  * @param {string} path
  * @returns {$CancellablePromise<number>}
  */
 export function GetFileStats(path) {
-    return $Call.ByID(73692144, path);
+    return $Call.ByID(3997025289, path);
 }
 
 /**
- * GetOS returns the current OS name
  * @returns {$CancellablePromise<string>}
  */
 export function GetOS() {
-    return $Call.ByID(816844233);
+    return $Call.ByID(2969004750);
 }
 
 /**
- * ListDirectory lists files in a remote directory
  * @param {string} path
  * @returns {$CancellablePromise<string>}
  */
 export function ListDirectory(path) {
-    return $Call.ByID(3882022436, path);
+    return $Call.ByID(3411144651, path);
 }
 
 /**
- * LoadProfiles loads SSH profiles from disk
  * @returns {$CancellablePromise<string>}
  */
 export function LoadProfiles() {
-    return $Call.ByID(2231927011);
+    return $Call.ByID(1373793870);
 }
 
 /**
- * LoadSettings loads terminal settings from disk
  * @returns {$CancellablePromise<string>}
  */
 export function LoadSettings() {
-    return $Call.ByID(3551729052);
+    return $Call.ByID(2629865441);
 }
 
 /**
- * Mkdir creates a remote directory
  * @param {string} path
  * @returns {$CancellablePromise<void>}
  */
 export function Mkdir(path) {
-    return $Call.ByID(1411813792, path);
+    return $Call.ByID(1117168011, path);
 }
 
 /**
- * OpenFileWithDefaultApp opens a file with the OS default application
  * @param {string} path
  * @returns {$CancellablePromise<void>}
  */
 export function OpenFileWithDefaultApp(path) {
-    return $Call.ByID(2401505219, path);
+    return $Call.ByID(1193656674, path);
 }
 
 /**
- * ReadFileAsBase64 reads a local file and returns it as base64-encoded string
  * @param {string} path
  * @returns {$CancellablePromise<string>}
  */
 export function ReadFileAsBase64(path) {
-    return $Call.ByID(1807168848, path);
+    return $Call.ByID(2508253217, path);
 }
 
 /**
- * RenameFile renames/moves a remote file
  * @param {string} src
  * @param {string} dest
  * @returns {$CancellablePromise<void>}
  */
 export function RenameFile(src, dest) {
-    return $Call.ByID(1151698069, src, dest);
+    return $Call.ByID(447518628, src, dest);
 }
 
 /**
- * ResizeTerminal resizes the remote PTY
  * @param {number} cols
  * @param {number} rows
  * @returns {$CancellablePromise<void>}
  */
 export function ResizeTerminal(cols, rows) {
-    return $Call.ByID(1887984285, cols, rows);
+    return $Call.ByID(3309742912, cols, rows);
 }
 
 /**
- * SaveProfiles saves SSH profiles to disk
  * @param {string} data
  * @returns {$CancellablePromise<void>}
  */
 export function SaveProfiles(data) {
-    return $Call.ByID(531418994, data);
+    return $Call.ByID(2747840815, data);
 }
 
 /**
- * SaveSettings saves terminal settings to disk
  * @param {string} data
  * @returns {$CancellablePromise<void>}
  */
 export function SaveSettings(data) {
-    return $Call.ByID(1949631069, data);
+    return $Call.ByID(1632959616, data);
 }
 
 /**
- * ShowMessage shows a native message box
  * @param {string} title
  * @param {string} message
  * @returns {$CancellablePromise<string>}
  */
 export function ShowMessage(title, message) {
-    return $Call.ByID(605677059, title, message);
+    return $Call.ByID(368851792, title, message);
 }
 
 /**
- * ShowOpenDialog shows a native open file dialog
  * @returns {$CancellablePromise<string>}
  */
 export function ShowOpenDialog() {
-    return $Call.ByID(421068596);
+    return $Call.ByID(271827769);
 }
 
 /**
- * ShowSaveDialog shows a native save file dialog
  * @param {string} defaultName
  * @returns {$CancellablePromise<string>}
  */
 export function ShowSaveDialog(defaultName) {
-    return $Call.ByID(1822028165, defaultName);
+    return $Call.ByID(3437106732, defaultName);
 }
 
 /**
- * UploadFile uploads a local file to remote path
  * @param {string} localPath
  * @param {string} remotePath
  * @returns {$CancellablePromise<void>}
  */
 export function UploadFile(localPath, remotePath) {
-    return $Call.ByID(3284072274, localPath, remotePath);
+    return $Call.ByID(3829671223, localPath, remotePath);
 }
 
 /**
- * WriteTerminal sends input to the terminal
  * @param {string} data
  * @returns {$CancellablePromise<void>}
  */
 export function WriteTerminal(data) {
-    return $Call.ByID(146795716, data);
+    return $Call.ByID(3608916995, data);
 }
