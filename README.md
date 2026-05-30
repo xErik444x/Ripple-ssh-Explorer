@@ -23,6 +23,9 @@ Built with [Wails v2](https://wails.io) + [Go](https://go.dev) + vanilla HTML/CS
 **Connected — Terminal + File Explorer**
 ![Connected](https://i.imgur.com/s3rdVio.png)
 
+**Server mode for linux without gtk library**
+<img width="1682" height="878" alt="image" src="https://github.com/user-attachments/assets/0ba3d2fc-6864-4540-931b-917eb5e5aee8" />
+
 ---
 
 ## What it does
