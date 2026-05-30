@@ -108,8 +108,12 @@ jobs:
         shell: bash
         run: |
           TAGS="${{ matrix.tags }}"
+          # Wails prepends "production,gtk3" (comma-separated) to whatever -tags
+          # value is passed, so additional tags must also be comma-separated —
+          # a space-separated value leaves extra words as bare package paths,
+          # causing "malformed import path" errors from go list.
           if [ -n "$TAGS" ]; then
-            wails3 build -tags "gtk3 $TAGS"
+            wails3 build -tags "gtk3,$TAGS"
           else
             wails3 build -tags "gtk3"
           fi
@@ -120,7 +124,7 @@ jobs:
         run: |
           TAGS="${{ matrix.tags }}"
           if [ -n "$TAGS" ]; then
-            wails3 task build:server BUILD_FLAGS="-tags gtk3 $TAGS"
+            wails3 task build:server BUILD_FLAGS="-tags gtk3,$TAGS"
           else
             wails3 task build:server BUILD_FLAGS="-tags gtk3"
           fi
