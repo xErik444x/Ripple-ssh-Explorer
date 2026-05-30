@@ -1,0 +1,155 @@
+name: Build and Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  version-check:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      should_release: ${{ steps.check.outputs.should_release }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Get version
+        id: version
+        run: |
+          VERSION=$(cat VERSION | tr -d ' \n\r')
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Current version: $VERSION"
+
+      - name: Check if tag exists
+        id: check
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          if git rev-parse "v$VERSION" >/dev/null 2>&1; then
+            echo "Tag v$VERSION already exists. Skipping release."
+            echo "should_release=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Tag v$VERSION does not exist. Will release."
+            echo "should_release=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    needs: version-check
+    if: needs.version-check.outputs.should_release == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: windows/amd64
+            tags: ""
+            name: windows-amd64
+          - os: windows-latest
+            platform: windows/amd64
+            tags: "native_webview2loader"
+            name: windows-amd64-native-webview2
+          - os: ubuntu-latest
+            platform: linux/amd64
+            tags: ""
+            name: linux-amd64
+          - os: ubuntu-latest
+            platform: linux/amd64
+            tags: ""
+            name: linux-amd64-server
+            server: "true"
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: stable
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install Wails
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.0-dev
+
+      - name: Build
+        shell: bash
+        run: |
+          TAGS="${{ matrix.tags }}"
+          SERVER="${{ matrix.server }}"
+          if [ "$SERVER" == "true" ]; then
+            wails build -s -platform ${{ matrix.platform }}
+          elif [ -n "$TAGS" ]; then
+            wails build -platform ${{ matrix.platform }} -tags "$TAGS"
+          else
+            wails build -platform ${{ matrix.platform }}
+          fi
+
+      - name: Rename output (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          mkdir -p dist
+          cp build/bin/ripple-ssh.exe dist/ripple-ssh-${{ matrix.name }}.exe
+
+      - name: Rename output (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p dist
+          cp build/bin/ripple-ssh dist/ripple-ssh-${{ matrix.name }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ripple-ssh-${{ matrix.name }}
+          path: dist/*
+
+  release:
+    needs: [version-check, build]
+    runs-on: ubuntu-latest
+    if: needs.version-check.outputs.should_release == 'true'
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Generate release body
+        run: |
+          cat > release_notes.md << 'EOF'
+          ## Ripple SSH v${{ needs.version-check.outputs.version }}
+
+          ### Available Builds
+
+          | File | Platform | Description |
+          |------|----------|-------------|
+          | `ripple-ssh-windows-amd64.exe` | Windows | Standard build with embedded WebView2 loader. Recommended for most users. |
+          | `ripple-ssh-windows-amd64-native-webview2.exe` | Windows | Build using the **native WebView2 loader** (`-tags native_webview2loader`). Smaller binary size; requires WebView2 Runtime already installed on the system. |
+          | `ripple-ssh-linux-amd64` | Linux | Standard desktop build using **WebKitGTK**. Native window with embedded webview. |
+          | `ripple-ssh-linux-amd64-server` | Linux | **Server mode** (`wails build -s`). Runs a local server and opens the app in your default web browser. Useful if you prefer to avoid WebKitGTK dependencies or want to use your own browser. |
+
+          ---
+          EOF
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ needs.version-check.outputs.version }}
+          name: v${{ needs.version-check.outputs.version }}
+          body_path: release_notes.md
+          files: artifacts/**/*
