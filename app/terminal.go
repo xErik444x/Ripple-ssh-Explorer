@@ -6,14 +6,17 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-func (a *App) startTerminal() {
-	a.log("Starting terminal session...")
-	a.mu.Lock()
-	client := a.sshClient
-	a.mu.Unlock()
+func (a *App) startTerminal(tabId string) {
+	a.log(fmt.Sprintf("Starting terminal session (tab: %s)", tabId))
 
+	tab := a.getTab(tabId)
+	if tab == nil {
+		a.log("Terminal: tab not found")
+		return
+	}
+	client := tab.SSHClient
 	if client == nil {
-		a.log("Terminal: no SSH client")
+		a.log("Terminal: no SSH client for tab")
 		return
 	}
 
@@ -21,6 +24,7 @@ func (a *App) startTerminal() {
 	if err != nil {
 		a.log(fmt.Sprintf("Terminal session failed: %s", err.Error()))
 		a.app.Event.Emit("ssh.error", map[string]string{
+			"tabId":   tabId,
 			"message": fmt.Sprintf("Shell init failed: %s", err.Error()),
 		})
 		return
@@ -72,7 +76,9 @@ func (a *App) startTerminal() {
 	}
 
 	a.mu.Lock()
-	a.terminalSession = ts
+	if t := a.tabs[tabId]; t != nil {
+		t.TerminalSession = ts
+	}
 	a.mu.Unlock()
 
 	go func() {
@@ -80,9 +86,9 @@ func (a *App) startTerminal() {
 		for {
 			n, err := stdout.Read(buf)
 			if n > 0 {
-				a.log(fmt.Sprintf("Terminal data: %d bytes", n))
 				a.app.Event.Emit("terminal.data", map[string]string{
-					"data": string(buf[:n]),
+					"tabId": tabId,
+					"data":  string(buf[:n]),
 				})
 			}
 			if err != nil {
@@ -97,7 +103,8 @@ func (a *App) startTerminal() {
 			n, err := stderr.Read(buf)
 			if n > 0 {
 				a.app.Event.Emit("terminal.data", map[string]string{
-					"data": string(buf[:n]),
+					"tabId": tabId,
+					"data":  string(buf[:n]),
 				})
 			}
 			if err != nil {
@@ -109,34 +116,27 @@ func (a *App) startTerminal() {
 	_ = session.Wait()
 }
 
-// WriteTerminal writes user input to the terminal's stdin.
-func (a *App) WriteTerminal(data string) {
-	a.mu.Lock()
-	ts := a.terminalSession
-	a.mu.Unlock()
-
-	if ts != nil && ts.stdin != nil {
-		if _, err := ts.stdin.Write([]byte(data)); err != nil {
-			a.log(fmt.Sprintf("WriteTerminal error: %v", err))
-			a.app.Event.Emit("ssh.error", map[string]string{
-				"message": fmt.Sprintf("Terminal write error: %s", err.Error()),
-			})
-		}
-	} else {
-		a.log("WriteTerminal: no terminal session")
+func (a *App) WriteTerminal(tabId, data string) {
+	tab := a.getTab(tabId)
+	if tab == nil || tab.TerminalSession == nil || tab.TerminalSession.stdin == nil {
+		return
+	}
+	if _, err := tab.TerminalSession.stdin.Write([]byte(data)); err != nil {
+		a.log(fmt.Sprintf("WriteTerminal error: %v", err))
+		a.app.Event.Emit("ssh.error", map[string]string{
+			"tabId":   tabId,
+			"message": fmt.Sprintf("Terminal write error: %s", err.Error()),
+		})
 	}
 }
 
-// ResizeTerminal resizes the PTY dimensions.
-func (a *App) ResizeTerminal(cols, rows int) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-
-	if a.sshClient == nil {
+func (a *App) ResizeTerminal(tabId string, cols, rows int) {
+	tab := a.getTab(tabId)
+	if tab == nil || tab.SSHClient == nil {
 		return
 	}
 
-	session, err := a.sshClient.NewSession()
+	session, err := tab.SSHClient.NewSession()
 	if err != nil {
 		a.log(fmt.Sprintf("ResizeTerminal: session error: %v", err))
 		return

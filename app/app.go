@@ -1,5 +1,3 @@
-// Package app implements the backend logic for Ripple SSH — a Wails v3 desktop application
-// providing SSH, SFTP, and terminal functionality exposed to the JavaScript frontend.
 package app
 
 import (
@@ -16,15 +14,13 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-// App is the main application struct that holds SSH, SFTP, and terminal state.
-type App struct {
-	app      *application.App
-	sshClient  *ssh.Client
-	sftpClient *sftp.Client
-	mu         sync.Mutex
-
-	terminalSession *terminalSession
-	logFile         *os.File
+type connectionState struct {
+	Host            string
+	Username        string
+	Port            string
+	SSHClient       *ssh.Client
+	SFTPClient      *sftp.Client
+	TerminalSession *terminalSession
 }
 
 type terminalSession struct {
@@ -33,19 +29,25 @@ type terminalSession struct {
 	done   chan struct{}
 }
 
-// FileEntry represents a single file or directory entry for the frontend.
 type FileEntry struct {
 	Name  string `json:"name"`
 	Size  int64  `json:"size"`
 	IsDir bool   `json:"isDir"`
 }
 
-// NewApp creates a new App instance.
-func NewApp() *App {
-	return &App{}
+type App struct {
+	app     *application.App
+	tabs    map[string]*connectionState
+	mu      sync.RWMutex
+	logFile *os.File
 }
 
-// ServiceStartup is called by Wails when the service starts.
+func NewApp() *App {
+	return &App{
+		tabs: make(map[string]*connectionState),
+	}
+}
+
 func (a *App) ServiceStartup(_ context.Context, options application.ServiceOptions) error {
 	a.app = application.Get()
 	a.initLogFile()
@@ -65,11 +67,13 @@ func (a *App) initLogFile() {
 	a.logFile = f
 }
 
-// ServiceShutdown is called by Wails when the service shuts down.
 func (a *App) ServiceShutdown() {
-	if err := a.DisconnectSSH(); err != nil {
-		a.log(fmt.Sprintf("Disconnect error during shutdown: %v", err))
+	a.mu.Lock()
+	for id, tab := range a.tabs {
+		a.disconnectTabLocked(tab)
+		delete(a.tabs, id)
 	}
+	a.mu.Unlock()
 	if a.logFile != nil {
 		a.log("=== App shutting down ===")
 		if err := a.logFile.Close(); err != nil {
@@ -88,4 +92,42 @@ func (a *App) log(msg string) {
 			fmt.Fprintf(os.Stderr, "log sync error: %v\n", err)
 		}
 	}
+}
+
+func (a *App) NewTab() string {
+	id := fmt.Sprintf("tab-%d", time.Now().UnixNano())
+	a.mu.Lock()
+	a.tabs[id] = &connectionState{}
+	a.mu.Unlock()
+	a.log(fmt.Sprintf("NewTab: %s", id))
+	return id
+}
+
+func (a *App) CloseTab(tabId string) {
+	a.mu.Lock()
+	tab := a.tabs[tabId]
+	if tab != nil {
+		a.disconnectTabLocked(tab)
+		delete(a.tabs, tabId)
+	}
+	a.mu.Unlock()
+	a.log(fmt.Sprintf("CloseTab: %s", tabId))
+}
+
+func (a *App) disconnectTabLocked(tab *connectionState) {
+	if tab.SFTPClient != nil {
+		_ = tab.SFTPClient.Close()
+		tab.SFTPClient = nil
+	}
+	if tab.SSHClient != nil {
+		_ = tab.SSHClient.Close()
+		tab.SSHClient = nil
+	}
+	tab.TerminalSession = nil
+}
+
+func (a *App) getTab(tabId string) *connectionState {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.tabs[tabId]
 }

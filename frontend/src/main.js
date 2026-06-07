@@ -2,15 +2,22 @@ import './style.css';
 import { Events } from '@wailsio/runtime';
 import * as App from '../bindings/ripple-ssh-wails/app/app';
 
-let profiles = [];
-let currentPath = '/';
-let isConnected = false;
-let terminal = null;
-let fitAddon = null;
+const tabs = new Map();
+const tabOrder = [];
+let activeTabId = null;
 
-window.addEventListener('unhandledrejection', (e) => {
-  console.error('[Ripple SSH] Unhandled rejection:', e.reason);
-});
+let profiles = [];
+let ctxTarget = null;
+const activeTransfers = new Set();
+const previewTransfers = {};
+const previewCancelled = {};
+const _closingTabIds = new Set();
+
+const terminalSettings = {
+  fontSize: 14,
+  lineHeight: 1.5,
+  fontFamily: 'Fira Code'
+};
 
 function escapeHtml(str) {
   const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' };
@@ -40,11 +47,6 @@ function showToast(message, type = 'info', duration = 4000) {
   }, duration);
 }
 
-let ctxTarget = null;
-const activeTransfers = new Set();
-const previewTransfers = {};
-const previewCancelled = {};
-
 const ICONS = {
   folder: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>',
   file: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path><polyline points="13 2 13 9 20 9"></polyline></svg>',
@@ -61,56 +63,452 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 });
 
+function getActiveTab() {
+  return activeTabId ? tabs.get(activeTabId) : null;
+}
+
 async function initApp() {
   await loadTerminalSettings();
   setupEventListeners();
   await loadProfiles();
+  await createNewTab();
+}
+
+async function createNewTab(existingTabId) {
+  const tabId = existingTabId || await App.NewTab();
+  if (!tabId) return;
+
+  const tab = {
+    id: tabId,
+    type: 'form',
+    status: 'disconnected',
+    label: 'New Connection',
+    host: '',
+    port: '22',
+    username: '',
+    authType: 'password',
+    password: '',
+    privateKeyText: '',
+    passphrase: '',
+    privateKeyPath: '',
+    terminal: null,
+    fitAddon: null,
+    currentPath: '.',
+    resizeObserver: null
+  };
+
+  tabs.set(tabId, tab);
+  tabOrder.push(tabId);
+  renderTabBar();
+  switchToTab(tabId);
+}
+
+async function closeTab(tabId) {
+  const tab = tabs.get(tabId);
+  if (!tab) return;
+
+  _closingTabIds.add(tabId);
+
+  if (tab.status === 'connected') {
+    try {
+      await App.DisconnectSSH(tabId);
+    } catch (e) {
+      console.warn('[Ripple] Disconnect error on close:', e);
+    }
+  }
+
+  if (tab.terminal) {
+    disposeTerminal(tab);
+  }
+
+  App.CloseTab(tabId).catch(() => {});
+
+  tabs.delete(tabId);
+  const idx = tabOrder.indexOf(tabId);
+  if (idx >= 0) tabOrder.splice(idx, 1);
+  _closingTabIds.delete(tabId);
+
+  if (tabOrder.length === 0) {
+    createNewTab();
+    renderTabBar();
+    return;
+  }
+
+  if (activeTabId === tabId) {
+    const connectedTabs = tabOrder.filter(id => {
+      const t = tabs.get(id);
+      return t && t.status === 'connected';
+    });
+    if (connectedTabs.length > 0) {
+      switchToTab(connectedTabs[0]);
+    } else {
+      const newIdx = Math.min(idx, tabOrder.length - 1);
+      switchToTab(tabOrder[newIdx]);
+    }
+  }
+  renderTabBar();
+}
+
+function switchToTab(tabId) {
+  const prevTab = getActiveTab();
+  const newTab = tabs.get(tabId);
+  if (!newTab) return;
+
+  if (prevTab && prevTab.id !== tabId && prevTab.type === 'form') {
+    saveFormToTab(prevTab);
+  }
+
+  const configPanel = document.getElementById('config-panel');
+  const terminalPanel = document.getElementById('terminal-panel');
+
+  document.querySelectorAll('.tab-item').forEach(el => el.classList.remove('active'));
+  const tabEl = document.querySelector(`.tab-item[data-tab-id="${tabId}"]`);
+  if (tabEl) tabEl.classList.add('active');
+
+  document.querySelectorAll('.terminal-view').forEach(el => el.classList.remove('active'));
+
+  const profilesPane = document.getElementById('profiles-pane');
+  const sftpPane = document.getElementById('sftp-pane');
+
+  if (newTab.type === 'terminal') {
+    configPanel.classList.add('hidden');
+    terminalPanel.classList.remove('hidden');
+    profilesPane.classList.add('hidden');
+    sftpPane.classList.remove('hidden');
+
+    const tv = document.querySelector(`.terminal-view[data-tab-id="${tabId}"]`);
+    if (tv) {
+      tv.classList.add('active');
+      if (newTab.fitAddon) {
+        requestAnimationFrame(() => {
+          newTab.fitAddon.fit();
+          if (newTab.terminal) {
+            App.ResizeTerminal(tabId, newTab.terminal.cols, newTab.terminal.rows).catch(() => {});
+          }
+        });
+      }
+    }
+    updateHeaderStatus(newTab);
+    loadDirectory(tabId, newTab.currentPath);
+  } else {
+    terminalPanel.classList.add('hidden');
+    configPanel.classList.remove('hidden');
+    profilesPane.classList.remove('hidden');
+    sftpPane.classList.add('hidden');
+    loadFormFromTab(newTab);
+    updateHeaderStatus(null);
+
+    document.getElementById('btn-disconnect').classList.add('hidden');
+    document.getElementById('btn-settings').classList.add('hidden');
+  }
+
+  activeTabId = tabId;
+}
+
+function saveFormToTab(tab) {
+  tab.host = document.getElementById('ssh-host').value.trim();
+  tab.port = document.getElementById('ssh-port').value.trim() || '22';
+  tab.username = document.getElementById('ssh-username').value.trim();
+  const authBtn = document.querySelector('.auth-btn.active');
+  tab.authType = authBtn ? authBtn.getAttribute('data-target') : 'password';
+  tab.password = document.getElementById('ssh-password').value;
+  tab.privateKeyPath = document.getElementById('ssh-key-path').value.trim();
+  tab.privateKeyText = document.getElementById('ssh-key-text').value;
+  tab.passphrase = document.getElementById('ssh-passphrase').value;
+}
+
+function loadFormFromTab(tab) {
+  document.getElementById('ssh-host').value = tab.host;
+  document.getElementById('ssh-port').value = tab.port;
+  document.getElementById('ssh-username').value = tab.username;
+
+  const authBtnPwd = document.getElementById('auth-btn-pwd');
+  const authBtnKey = document.getElementById('auth-btn-key');
+
+  if (tab.authType === 'password') {
+    authBtnPwd.click();
+    document.getElementById('ssh-password').value = tab.password;
+  } else {
+    authBtnKey.click();
+    document.getElementById('ssh-key-path').value = tab.privateKeyPath;
+    document.getElementById('ssh-key-text').value = tab.privateKeyText;
+    document.getElementById('ssh-passphrase').value = tab.passphrase;
+  }
+}
+
+function renderTabBar() {
+  const list = document.getElementById('tab-list');
+  list.innerHTML = '';
+
+  tabOrder.forEach(id => {
+    const tab = tabs.get(id);
+    if (!tab) return;
+
+    const item = document.createElement('div');
+    item.className = `tab-item${id === activeTabId ? ' active' : ''}`;
+    item.setAttribute('data-tab-id', id);
+    item.setAttribute('title', tab.label);
+
+    const dot = document.createElement('span');
+    dot.className = `tab-status-dot ${tab.status}`;
+    item.appendChild(dot);
+
+    const label = document.createElement('span');
+    label.className = 'tab-label';
+    label.textContent = tab.label;
+    item.appendChild(label);
+
+    const close = document.createElement('button');
+    close.className = 'tab-close';
+    close.innerHTML = '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>';
+    close.addEventListener('click', (e) => {
+      e.stopPropagation();
+      closeTab(id);
+    });
+    item.appendChild(close);
+
+    item.addEventListener('click', () => {
+      switchToTab(id);
+    });
+
+    item.addEventListener('mousedown', (e) => {
+      if (e.button === 1) {
+        e.preventDefault();
+        closeTab(id);
+      }
+    });
+
+    list.appendChild(item);
+  });
+
+  const addBtn = document.createElement('button');
+  addBtn.className = 'tab-add';
+  addBtn.title = 'New Tab';
+  addBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>';
+  addBtn.addEventListener('click', () => {
+    if (getActiveTab() && getActiveTab().type === 'form') {
+      saveFormToTab(getActiveTab());
+    }
+    createNewTab();
+  });
+  list.appendChild(addBtn);
+}
+
+function updateHeaderStatus(tab) {
+  const statusDot = document.getElementById('status-dot');
+  const statusText = document.getElementById('status-text');
+
+  if (tab && tab.status === 'connected') {
+    statusDot.className = 'status-indicator connected';
+    statusText.textContent = `Connected: ${tab.username}@${tab.host}`;
+  } else {
+    if (tab && tab.status === 'connecting') {
+      statusText.textContent = `Connecting to ${tab.host}...`;
+    } else {
+      statusText.textContent = 'Disconnected';
+    }
+    statusDot.className = 'status-indicator disconnected';
+  }
+}
+
+function disposeTerminal(tab) {
+  if (tab.resizeObserver) {
+    tab.resizeObserver.disconnect();
+    tab.resizeObserver = null;
+  }
+  if (tab.fitAddon) {
+    tab.fitAddon = null;
+  }
+  if (tab.terminal) {
+    tab.terminal.dispose();
+    tab.terminal = null;
+  }
+  const tv = document.querySelector(`.terminal-view[data-tab-id="${tab.id}"]`);
+  if (tv) tv.remove();
+  tab.type = 'form';
+  tab.status = 'disconnected';
+}
+
+function initTerminalForTab(tabId) {
+  const tab = tabs.get(tabId);
+  if (!tab || tab.terminal) return;
+
+  const views = document.getElementById('terminal-views');
+  let view = document.querySelector(`.terminal-view[data-tab-id="${tabId}"]`);
+  if (!view) {
+    view = document.createElement('div');
+    view.className = 'terminal-view';
+    view.setAttribute('data-tab-id', tabId);
+    views.appendChild(view);
+  }
+
+  try {
+    const term = new Terminal({
+      cursorBlink: true,
+      fontSize: terminalSettings.fontSize,
+      lineHeight: terminalSettings.lineHeight,
+      fontFamily: `"${terminalSettings.fontFamily}", var(--font-mono)`
+    });
+    term.open(view);
+
+    tab.terminal = term;
+    tab.fitAddon = typeof FitAddon.FitAddon !== 'undefined' ? new FitAddon.FitAddon() : new FitAddon();
+    if (tab.fitAddon.fit) {
+      term.loadAddon(tab.fitAddon);
+      requestAnimationFrame(() => tab.fitAddon.fit());
+    }
+
+    term.onData((data) => {
+      const t = tabs.get(tabId);
+      if (t && t.status === 'connected') {
+        App.WriteTerminal(tabId, data).catch(err => console.warn('[Ripple] WriteTerminal:', err));
+      }
+    });
+
+    if (tab.resizeObserver) tab.resizeObserver.disconnect();
+    tab.resizeObserver = new ResizeObserver(() => {
+      requestAnimationFrame(() => {
+        if (!tab.fitAddon || !tab.fitAddon.fit) return;
+        tab.fitAddon.fit();
+        if (tab.terminal) {
+          App.ResizeTerminal(tabId, tab.terminal.cols, tab.terminal.rows).catch(() => {});
+        }
+      });
+    });
+    tab.resizeObserver.observe(view);
+
+    view.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const ctx = document.getElementById('terminal-context-menu');
+      const hasSelection = tab.terminal.getSelection().length > 0;
+      document.getElementById('ctx-term-copy').style.display = hasSelection ? '' : 'none';
+      ctx.style.display = 'block';
+      ctx.style.left = `${e.clientX}px`;
+      ctx.style.top = `${e.clientY}px`;
+    });
+
+    view.addEventListener('keydown', (e) => {
+      if (e.shiftKey && (e.ctrlKey || e.metaKey)) {
+        if (e.key === 'c' || e.key === 'C') {
+          e.preventDefault();
+          const text = tab.terminal.getSelection();
+          if (text) navigator.clipboard.writeText(text).catch(err => console.warn('[Ripple] Clipboard write:', err));
+          tab.terminal.focus();
+        } else if (e.key === 'v' || e.key === 'V') {
+          e.preventDefault();
+          navigator.clipboard.readText().then(text => {
+            if (text && tab.status === 'connected') App.WriteTerminal(tabId, text).catch(err => console.warn('[Ripple] WriteTerminal:', err));
+          }).catch(err => console.warn('[Ripple] Clipboard read:', err));
+          tab.terminal.focus();
+        }
+      }
+    });
+
+  } catch (e) {
+    showToast(`Error terminal: ${e.message}`, 'error', 10000);
+  }
 }
 
 function setupEventListeners_backend() {
   Events.On('ssh.connected', (event) => {
     const data = event.data;
-    const { host, username } = data;
-    isConnected = true;
+    const { tabId, host, username } = data;
+    const tab = tabs.get(tabId);
+    if (!tab) return;
 
-    const statusDot = document.getElementById('status-dot');
-    statusDot.className = 'status-indicator connected';
-    document.getElementById('status-text').textContent = `Connected: ${username}@${host}`;
+    tab.status = 'connected';
+    tab.host = host;
+    tab.username = username;
+    tab.label = `${username}@${host}`;
+    tab.type = 'terminal';
 
-    document.getElementById('btn-disconnect').classList.remove('hidden');
-    document.getElementById('btn-settings').classList.remove('hidden');
-    document.getElementById('config-panel').classList.add('hidden');
-    document.getElementById('terminal-panel').classList.remove('hidden');
+    initTerminalForTab(tabId);
+    tab.currentPath = '.';
 
-    document.getElementById('profiles-pane').classList.add('hidden');
-    document.getElementById('sftp-pane').classList.remove('hidden');
+    if (activeTabId === tabId) {
+      updateHeaderStatus(tab);
+      document.getElementById('btn-disconnect').classList.remove('hidden');
+      document.getElementById('btn-settings').classList.remove('hidden');
+
+      const configPanel = document.getElementById('config-panel');
+      const terminalPanel = document.getElementById('terminal-panel');
+      configPanel.classList.add('hidden');
+      terminalPanel.classList.remove('hidden');
+
+      document.getElementById('profiles-pane').classList.add('hidden');
+      document.getElementById('sftp-pane').classList.remove('hidden');
+
+      const tv = document.querySelector(`.terminal-view[data-tab-id="${tabId}"]`);
+      if (tv) {
+        document.querySelectorAll('.terminal-view').forEach(el => el.classList.remove('active'));
+        tv.classList.add('active');
+        if (tab.fitAddon) {
+          requestAnimationFrame(() => {
+            tab.fitAddon.fit();
+            tab.terminal.focus();
+          });
+        }
+      }
+
+      setTimeout(() => loadDirectory(tabId, tab.currentPath), 200);
+    }
 
     const connectBtn = document.getElementById('btn-connect');
     connectBtn.disabled = false;
     connectBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path><polyline points="10 17 15 12 10 7"></polyline><line x1="15" y1="12" x2="3" y2="12"></line></svg> Connect Now';
 
-    initTerminal();
-    currentPath = '.';
-    setTimeout(() => loadDirectory(currentPath), 200);
+    renderTabBar();
   });
 
   Events.On('ssh.error', (event) => {
     const data = event.data;
-    const { message } = data;
+    const { tabId, message } = data;
     showToast(`SSH Error: ${message}`, 'error');
-    setDisconnectedState();
+    const tab = tabs.get(tabId);
+    if (tab) {
+      tab.status = 'disconnected';
+      renderTabBar();
+      if (activeTabId === tabId) updateHeaderStatus(tab);
+    }
+    document.getElementById('btn-connect').disabled = false;
+    document.getElementById('btn-connect').innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path><polyline points="10 17 15 12 10 7"></polyline><line x1="15" y1="12" x2="3" y2="12"></line></svg> Connect Now';
   });
 
-  Events.On('ssh.disconnected', () => {
-    setDisconnectedState();
+  Events.On('ssh.disconnected', (event) => {
+    const data = event.data;
+    const tabId = data && data.tabId;
+    const tab = tabs.get(tabId);
+    if (!tab) return;
+
+    tab.status = 'disconnected';
+
+    if (tab.terminal) {
+      disposeTerminal(tab);
+    }
+
+    if (!_closingTabIds.has(tabId) && activeTabId === tabId) {
+      const connectedTabs = tabOrder.filter(id => {
+        const t = tabs.get(id);
+        return t && t.status === 'connected';
+      });
+      if (connectedTabs.length > 0) {
+        switchToTab(connectedTabs[0]);
+      } else {
+        switchToTab(tabId);
+      }
+    }
+
+    renderTabBar();
   });
 
   Events.On('terminal.data', (event) => {
     const data = event.data;
-    const { data: termData } = data;
-    if (terminal) {
-      terminal.write(termData);
-      terminal.scrollToBottom();
+    const { tabId, data: termData } = data;
+    const tab = tabs.get(tabId);
+    if (tab && tab.terminal) {
+      tab.terminal.write(termData);
+      tab.terminal.scrollToBottom();
     }
   });
 
@@ -131,46 +529,6 @@ function setupEventListeners_backend() {
   });
 }
 
-function setDisconnectedState() {
-  isConnected = false;
-  activeTransfers.clear();
-  Object.keys(previewTransfers).forEach(k => { previewCancelled[k] = true; delete previewTransfers[k]; });
-
-  const statusDot = document.getElementById('status-dot');
-  statusDot.className = 'status-indicator disconnected';
-  document.getElementById('status-text').textContent = 'Disconnected';
-  document.getElementById('btn-disconnect').classList.add('hidden');
-  document.getElementById('btn-settings').classList.add('hidden');
-
-  document.getElementById('terminal-panel').classList.add('hidden');
-  document.getElementById('config-panel').classList.remove('hidden');
-
-  document.getElementById('sftp-pane').classList.add('hidden');
-  document.getElementById('profiles-pane').classList.remove('hidden');
-
-  const connectBtn = document.getElementById('btn-connect');
-  connectBtn.disabled = false;
-  connectBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path><polyline points="10 17 15 12 10 7"></polyline><line x1="15" y1="12" x2="3" y2="12"></line></svg> Connect Now';
-
-  if (terminal) {
-    terminal.dispose();
-    terminal = null;
-  }
-  if (fitAddon) {
-    fitAddon = null;
-  }
-  if (window._terminalResizeObserver) {
-    window._terminalResizeObserver.disconnect();
-    window._terminalResizeObserver = null;
-  }
-}
-
-const terminalSettings = {
-  fontSize: 14,
-  lineHeight: 1.5,
-  fontFamily: 'Fira Code'
-};
-
 async function loadTerminalSettings() {
   try {
     const raw = await App.LoadSettings();
@@ -186,21 +544,16 @@ async function saveTerminalSettings() {
 }
 
 function applyTerminalSettings() {
-  if (!terminal) return;
-
-  terminal.options.fontSize = terminalSettings.fontSize;
-  terminal.options.lineHeight = terminalSettings.lineHeight;
-  terminal.options.fontFamily = `"${terminalSettings.fontFamily}", var(--font-mono)`;
-
-  const core = terminal._core;
-  if (core && core._charSizeService && core._charSizeService.measure) {
-    core._charSizeService.measure();
-  }
-
-  if (fitAddon && fitAddon.fit) {
-    terminal.resize(terminal.cols + 1, terminal.rows);
-    fitAddon.fit();
-  }
+  tabs.forEach(tab => {
+    if (!tab.terminal) return;
+    tab.terminal.options.fontSize = terminalSettings.fontSize;
+    tab.terminal.options.lineHeight = terminalSettings.lineHeight;
+    tab.terminal.options.fontFamily = `"${terminalSettings.fontFamily}", var(--font-mono)`;
+    if (tab.fitAddon && tab.fitAddon.fit) {
+      tab.terminal.resize(tab.terminal.cols + 1, tab.terminal.rows);
+      tab.fitAddon.fit();
+    }
+  });
 }
 
 function setupSettingsDialog() {
@@ -244,80 +597,6 @@ function setupSettingsDialog() {
   });
 }
 
-function initTerminal() {
-  const container = document.getElementById('terminal-container');
-  if (!container) {
-    showToast('FATAL: terminal-container not found', 'error', 10000);
-    return;
-  }
-  container.innerHTML = '';
-
-  try {
-    const term = new Terminal({
-      cursorBlink: true,
-      fontSize: terminalSettings.fontSize,
-      lineHeight: terminalSettings.lineHeight,
-      fontFamily: `"${terminalSettings.fontFamily}", var(--font-mono)`
-    });
-    term.open(container);
-    terminal = term;
-
-    fitAddon = typeof FitAddon.FitAddon !== 'undefined' ? new FitAddon.FitAddon() : new FitAddon();
-    if (fitAddon.fit) {
-      terminal.loadAddon(fitAddon);
-      requestAnimationFrame(() => fitAddon.fit());
-    }
-
-    terminal.onData((data) => {
-      if (isConnected) {
-        App.WriteTerminal(data).catch(err => console.warn('[Ripple] WriteTerminal:', err));
-      }
-    });
-
-    if (window._terminalResizeObserver) {
-      window._terminalResizeObserver.disconnect();
-    }
-    window._terminalResizeObserver = new ResizeObserver(() => {
-      requestAnimationFrame(() => {
-        if (!fitAddon || !fitAddon.fit) return;
-        fitAddon.fit();
-        if (isConnected && terminal) {
-          App.ResizeTerminal(terminal.cols, terminal.rows).catch(err => console.warn('[Ripple] ResizeTerminal:', err));
-        }
-      });
-    });
-    window._terminalResizeObserver.observe(container);
-
-    container.addEventListener('contextmenu', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      const ctx = document.getElementById('terminal-context-menu');
-      const hasSelection = terminal.getSelection().length > 0;
-      document.getElementById('ctx-term-copy').style.display = hasSelection ? '' : 'none';
-      ctx.style.display = 'block';
-      ctx.style.left = `${e.clientX}px`;
-      ctx.style.top = `${e.clientY}px`;
-    });
-
-    container.addEventListener('keydown', (e) => {
-      if (e.shiftKey && (e.ctrlKey || e.metaKey)) {
-        if (e.key === 'c' || e.key === 'C') {
-          e.preventDefault();
-          const text = terminal.getSelection();
-          if (text) navigator.clipboard.writeText(text).catch(err => console.warn('[Ripple] Clipboard write:', err));
-        } else if (e.key === 'v' || e.key === 'V') {
-          e.preventDefault();
-          navigator.clipboard.readText().then(text => {
-            if (text && isConnected) App.WriteTerminal(text).catch(err => console.warn('[Ripple] WriteTerminal:', err));
-          }).catch(err => console.warn('[Ripple] Clipboard read:', err));
-        }
-      }
-    });
-  } catch (e) {
-    showToast(`Error terminal: ${e.message}`, 'error', 10000);
-  }
-}
-
 function setupEventListeners() {
   const authBtnPwd = document.getElementById('auth-btn-pwd');
   const authBtnKey = document.getElementById('auth-btn-key');
@@ -350,7 +629,10 @@ function setupEventListeners() {
   });
 
   document.getElementById('btn-disconnect').addEventListener('click', () => {
-    App.DisconnectSSH().catch(err => console.warn('[Ripple] Disconnect:', err));
+    const tab = getActiveTab();
+    if (tab) {
+      App.DisconnectSSH(tab.id).catch(err => console.warn('[Ripple] Disconnect:', err));
+    }
   });
 
   document.getElementById('ssh-form').addEventListener('submit', (e) => {
@@ -362,7 +644,8 @@ function setupEventListeners() {
   document.getElementById('btn-new-profile').addEventListener('click', clearForm);
 
   document.getElementById('sftp-btn-refresh').addEventListener('click', () => {
-    loadDirectory(currentPath);
+    const tab = getActiveTab();
+    if (tab) loadDirectory(tab.id, tab.currentPath);
   });
 
   document.getElementById('sftp-btn-mkdir').addEventListener('click', () => {
@@ -372,12 +655,14 @@ function setupEventListeners() {
 
   document.getElementById('form-mkdir').addEventListener('submit', (e) => {
     e.preventDefault();
+    const tab = getActiveTab();
+    if (!tab) return;
     const folderName = document.getElementById('mkdir-name').value.trim();
     if (folderName) {
       document.getElementById('dialog-mkdir').close();
-      const folderPath = joinPath(currentPath, folderName);
-      App.Mkdir(folderPath).then(() => {
-        loadDirectory(currentPath);
+      const folderPath = joinPath(tab.currentPath, folderName);
+      App.Mkdir(tab.id, folderPath).then(() => {
+        loadDirectory(tab.id, tab.currentPath);
       }).catch(err => {
         showToast(`Failed to create folder: ${err}`, 'error');
       });
@@ -387,9 +672,11 @@ function setupEventListeners() {
   document.getElementById('sftp-btn-upload').addEventListener('click', triggerUpload);
 
   document.getElementById('sftp-btn-up').addEventListener('click', () => {
-    if (currentPath !== '.' && currentPath !== '/') {
-      const upPath = getParentPath(currentPath);
-      loadDirectory(upPath);
+    const tab = getActiveTab();
+    if (!tab) return;
+    if (tab.currentPath !== '.' && tab.currentPath !== '/') {
+      const upPath = getParentPath(tab.currentPath);
+      loadDirectory(tab.id, upPath);
     }
   });
 
@@ -412,23 +699,31 @@ function setupEventListeners() {
   window.addEventListener('click', () => {
     contextMenu.style.display = 'none';
     termCtx.style.display = 'none';
+    const tab = getActiveTab();
+    if (tab && tab.terminal) {
+      tab.terminal.focus();
+    }
   });
 
   document.getElementById('ctx-term-copy').addEventListener('click', () => {
-    const text = terminal ? terminal.getSelection() : '';
+    const tab = getActiveTab();
+    const text = tab && tab.terminal ? tab.terminal.getSelection() : '';
     if (text) {
       navigator.clipboard.writeText(text).catch(err => console.warn('[Ripple] Clipboard write:', err));
     }
     termCtx.style.display = 'none';
+    if (tab && tab.terminal) tab.terminal.focus();
   });
 
   document.getElementById('ctx-term-paste').addEventListener('click', () => {
+    const tab = getActiveTab();
     navigator.clipboard.readText().then(text => {
-      if (text && isConnected) {
-        App.WriteTerminal(text).catch(err => console.warn('[Ripple] WriteTerminal:', err));
+      if (text && tab && tab.status === 'connected') {
+        App.WriteTerminal(tab.id, text).catch(err => console.warn('[Ripple] WriteTerminal:', err));
       }
     }).catch(err => console.warn('[Ripple] Clipboard read:', err));
     termCtx.style.display = 'none';
+    if (tab && tab.terminal) tab.terminal.focus();
   });
 
   document.getElementById('ctx-download').addEventListener('click', triggerDownload);
@@ -458,14 +753,16 @@ function setupEventListeners() {
 
   document.getElementById('form-rename').addEventListener('submit', (e) => {
     e.preventDefault();
+    const tab = getActiveTab();
+    if (!tab) return;
     const newName = document.getElementById('rename-new-name').value.trim();
     const originalPath = document.getElementById('rename-original-path').value;
     if (newName && originalPath) {
       document.getElementById('dialog-rename').close();
       const parent = getParentPath(originalPath);
       const destPath = joinPath(parent, newName);
-      App.RenameFile(originalPath, destPath).then(() => {
-        loadDirectory(currentPath);
+      App.RenameFile(tab.id, originalPath, destPath).then(() => {
+        loadDirectory(tab.id, tab.currentPath);
       }).catch(err => {
         showToast(`Rename failed: ${err}`, 'error');
       });
@@ -476,11 +773,14 @@ function setupEventListeners() {
   setupEventListeners_backend();
 }
 
-function loadDirectory(path) {
+function loadDirectory(tabId, path) {
+  if (!tabId) return;
   document.getElementById('sftp-file-list').innerHTML = '<div class="loading-state">Loading directory...</div>';
-  App.ListDirectory(path).then(files => {
+  App.ListDirectory(tabId, path).then(files => {
+    const tab = tabs.get(tabId);
+    if (!tab) return;
     if (typeof files === 'string') files = JSON.parse(files);
-    currentPath = path;
+    tab.currentPath = path;
     renderFileList(files);
     renderBreadcrumbs(path);
   }).catch(err => {
@@ -495,46 +795,32 @@ function loadDirectory(path) {
 }
 
 function connectSsh() {
+  const tab = getActiveTab();
+  if (!tab || tab.status === 'connecting' || tab.status === 'connected') return;
+
   const connectBtn = document.getElementById('btn-connect');
-  if (connectBtn.disabled) return;
   connectBtn.disabled = true;
   connectBtn.textContent = 'Connecting...';
 
-  const host = document.getElementById('ssh-host').value.trim();
-  const port = document.getElementById('ssh-port').value.trim() || '22';
-  const username = document.getElementById('ssh-username').value.trim();
+  saveFormToTab(tab);
 
-  const authBtn = document.querySelector('.auth-btn.active');
-  const authType = authBtn ? authBtn.getAttribute('data-target') : 'password';
+  tab.label = `${tab.username}@${tab.host}`;
+  tab.status = 'connecting';
+  renderTabBar();
+  updateHeaderStatus(tab);
 
-  let password = '';
-  let privateKeyText = '';
-  let passphrase = '';
-
-  if (authType === 'password') {
-    password = document.getElementById('ssh-password').value;
-  } else {
-    const keyPath = document.getElementById('ssh-key-path').value.trim();
-    privateKeyText = document.getElementById('ssh-key-text').value;
-    passphrase = document.getElementById('ssh-passphrase').value;
-    if (keyPath && !privateKeyText) {
-      showToast('Please paste key text or use password auth.', 'warning');
-      connectBtn.disabled = false;
-      connectBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path><polyline points="10 17 15 12 10 7"></polyline><line x1="15" y1="12" x2="3" y2="12"></line></svg> Connect Now';
-      return;
-    }
-  }
-
-  document.getElementById('status-text').textContent = `Connecting to ${host}...`;
-
-  App.ConnectSSH(host, port, username, password, privateKeyText, passphrase).catch(err => {
+  App.ConnectSSH(tab.id, tab.host, tab.port, tab.username, tab.password, tab.privateKeyText, tab.passphrase).catch(err => {
     showToast(`SSH Error: ${err}`, 'error');
-    setDisconnectedState();
+    tab.status = 'disconnected';
+    connectBtn.disabled = false;
+    connectBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path><polyline points="10 17 15 12 10 7"></polyline><line x1="15" y1="12" x2="3" y2="12"></line></svg> Connect Now';
+    renderTabBar();
+    if (activeTabId === tab.id) updateHeaderStatus(tab);
   });
 
   const profileName = document.getElementById('profile-name').value.trim();
   if (profileName) {
-    saveProfileData(profileName, { host, port, username, password, privateKeyPath: document.getElementById('ssh-key-path').value.trim(), privateKeyText, passphrase }, authType);
+    saveProfileData(profileName, { host: tab.host, port: tab.port, username: tab.username, password: tab.password, privateKeyPath: document.getElementById('ssh-key-path').value.trim(), privateKeyText: tab.privateKeyText, passphrase: tab.passphrase }, tab.authType);
   }
 }
 
@@ -557,7 +843,8 @@ function renderFileList(files) {
     const item = document.createElement('div');
     item.className = `file-item ${file.isDir ? 'directory' : ''}`;
     item.setAttribute('data-name', file.name);
-    item.setAttribute('data-path', joinPath(currentPath, file.name));
+    const tab = getActiveTab();
+    item.setAttribute('data-path', tab ? joinPath(tab.currentPath, file.name) : file.name);
     item.setAttribute('data-isdir', file.isDir);
 
     let icon = ICONS.file;
@@ -581,11 +868,13 @@ function renderFileList(files) {
     `;
 
     item.addEventListener('dblclick', () => {
+      const t = getActiveTab();
+      if (!t) return;
       if (file.isDir) {
-        const nextPath = joinPath(currentPath, file.name);
-        loadDirectory(nextPath);
+        const nextPath = joinPath(t.currentPath, file.name);
+        loadDirectory(t.id, nextPath);
       } else {
-        triggerFileDownload(joinPath(currentPath, file.name), file.name);
+        triggerFileDownload(t.id, joinPath(t.currentPath, file.name), file.name);
       }
     });
 
@@ -593,9 +882,10 @@ function renderFileList(files) {
       e.preventDefault();
       e.stopPropagation();
 
+      const t = getActiveTab();
       ctxTarget = {
         name: file.name,
-        path: joinPath(currentPath, file.name),
+        path: t ? joinPath(t.currentPath, file.name) : file.name,
         isDir: file.isDir
       };
 
@@ -630,17 +920,20 @@ function renderBreadcrumbs(pathStr) {
 
   container.querySelectorAll('.crumb').forEach(el => {
     el.addEventListener('click', () => {
-      loadDirectory(el.getAttribute('data-path'));
+      const t = getActiveTab();
+      if (t) loadDirectory(t.id, el.getAttribute('data-path'));
     });
   });
 }
 
 function triggerDownload() {
   if (!ctxTarget || ctxTarget.isDir) return;
-  triggerFileDownload(ctxTarget.path, ctxTarget.name);
+  const tab = getActiveTab();
+  if (!tab) return;
+  triggerFileDownload(tab.id, ctxTarget.path, ctxTarget.name);
 }
 
-async function triggerFileDownload(remoteFilePath, filename) {
+async function triggerFileDownload(tabId, remoteFilePath, filename) {
   try {
     const localDest = await App.ShowSaveDialog(filename);
 
@@ -650,7 +943,7 @@ async function triggerFileDownload(remoteFilePath, filename) {
 
       showTransferStatus('Preparing Download...', 0, 'Starting stream...');
 
-      App.DownloadFile(remoteFilePath, localDest).then(() => {
+      App.DownloadFile(tabId, remoteFilePath, localDest).then(() => {
         activeTransfers.delete(transferId);
         showToast(`Download completed:\n${localDest}`, 'success');
         hideTransferStatus();
@@ -681,8 +974,10 @@ async function triggerDelete() {
   );
 
   if (confirm === 'Yes') {
-    App.DeleteFile(ctxTarget.path, ctxTarget.isDir).then(() => {
-      loadDirectory(currentPath);
+    const tab = getActiveTab();
+    if (!tab) return;
+    App.DeleteFile(tab.id, ctxTarget.path, ctxTarget.isDir).then(() => {
+      loadDirectory(tab.id, tab.currentPath);
     }).catch(err => {
       showToast(`Delete failed: ${err}`, 'error');
     });
@@ -690,23 +985,26 @@ async function triggerDelete() {
 }
 
 async function triggerUpload() {
+  const tab = getActiveTab();
+  if (!tab) return;
+
   try {
     const selected = await App.ShowOpenDialog();
     if (selected && selected.length > 0) {
       const localFilePath = selected;
       const filename = localFilePath.split(/[/\\]/).pop();
-      const remoteFilePath = joinPath(currentPath, filename);
+      const remoteFilePath = joinPath(tab.currentPath, filename);
 
       const transferId = Math.random().toString(36).substring(2, 9);
       activeTransfers.add(transferId);
 
       showTransferStatus('Preparing Upload...', 0, 'Starting stream...');
 
-      App.UploadFile(localFilePath, remoteFilePath).then(() => {
+      App.UploadFile(tab.id, localFilePath, remoteFilePath).then(() => {
         activeTransfers.delete(transferId);
         showToast(`Upload completed:\n${remoteFilePath}`, 'success');
         hideTransferStatus();
-        loadDirectory(currentPath);
+        loadDirectory(tab.id, tab.currentPath);
       }).catch(err => {
         activeTransfers.delete(transferId);
         showToast(`Upload failed: ${err}`, 'error');
@@ -849,8 +1147,19 @@ function renderProfiles() {
 }
 
 function loadProfileIntoForm(p) {
+  const tab = getActiveTab();
+  if (!tab || tab.type !== 'form') {
+    showToast('Switch to a New Connection tab to load a profile.', 'info');
+    return;
+  }
+
   document.getElementById('profile-id').value = p.id;
   document.getElementById('profile-name').value = p.name;
+
+  tab.host = p.credentials.host;
+  tab.port = p.credentials.port;
+  tab.username = p.credentials.username;
+
   document.getElementById('ssh-host').value = p.credentials.host;
   document.getElementById('ssh-port').value = p.credentials.port;
   document.getElementById('ssh-username').value = p.credentials.username;
@@ -860,9 +1169,15 @@ function loadProfileIntoForm(p) {
 
   if (p.authType === 'password') {
     authBtnPwd.click();
+    tab.authType = 'password';
+    tab.password = p.credentials.password || '';
     document.getElementById('ssh-password').value = p.credentials.password || '';
   } else {
     authBtnKey.click();
+    tab.authType = 'key';
+    tab.privateKeyPath = p.credentials.privateKeyPath || '';
+    tab.privateKeyText = p.credentials.privateKeyText || '';
+    tab.passphrase = p.credentials.passphrase || '';
     document.getElementById('ssh-key-path').value = p.credentials.privateKeyPath || '';
     document.getElementById('ssh-key-text').value = p.credentials.privateKeyText || '';
     document.getElementById('ssh-passphrase').value = p.credentials.passphrase || '';
@@ -870,6 +1185,18 @@ function loadProfileIntoForm(p) {
 }
 
 function clearForm() {
+  const tab = getActiveTab();
+  if (tab && tab.type === 'form') {
+    tab.host = '';
+    tab.port = '22';
+    tab.username = '';
+    tab.password = '';
+    tab.privateKeyPath = '';
+    tab.privateKeyText = '';
+    tab.passphrase = '';
+    tab.authType = 'password';
+  }
+
   document.getElementById('profile-id').value = '';
   document.getElementById('profile-name').value = '';
   document.getElementById('ssh-host').value = '';
@@ -922,7 +1249,7 @@ function getMimeFromExt(ext) {
     svg:'image/svg+xml',
     pdf:'application/pdf',
     mp4:'video/mp4', webm:'video/webm', mkv:'video/x-matroska', mov:'video/quicktime', avi:'video/x-msvideo', flv:'video/x-flv', wmv:'video/x-ms-wmv',
-    mp3:'audio/mpeg', wav:'audio/wav', ogg:'audio/ogg', flac:'audio/flac', aac:'audio/aac', m4a:'audio/mp4', wma:'audio/x-ms-wma',
+    mp3:'audio/mpeg', wav:'audio/wav', ogg:'audio/ogg', flac:'audio/flac', aac:'audio/m4a', m4a:'audio/mp4', wma:'audio/x-ms-wma',
     js:'text/javascript', json:'application/json', py:'text/x-python', html:'text/html', css:'text/css', ts:'text/typescript', rs:'text/rust', cpp:'text/x-c++src', c:'text/x-csrc', sh:'application/x-sh', php:'application/x-httpd-php', txt:'text/plain', md:'text/markdown', log:'text/plain', xml:'application/xml', yaml:'application/x-yaml', yml:'application/x-yaml', ini:'text/plain', conf:'text/plain', sql:'text/x-sql', bat:'application/x-bat', cmd:'application/x-cmd', ps1:'application/x-powershell',
     lua:'text/x-lua', go:'text/x-go', java:'text/x-java', rb:'text/x-ruby', kt:'text/x-kotlin', swift:'text/x-swift', dart:'text/x-dart', vue:'text/x-vue', scss:'text/x-scss', sass:'text/x-sass', less:'text/x-less', h:'text/x-chdr', hpp:'text/x-c++hdr', cs:'text/x-csharp', pl:'text/x-perl', r:'text/x-r', dockerfile:'text/x-dockerfile'
   };
@@ -947,8 +1274,6 @@ function detectFileTypeFromName(filename) {
   return { category: 'unsupported', mime: 'application/octet-stream' };
 }
 
-// detectByMagicBytes and isPrintableText are reserved for future content-based detection
-
 async function triggerPreview() {
   if (!ctxTarget || ctxTarget.isDir) return;
 
@@ -959,7 +1284,9 @@ async function triggerPreview() {
     previewDialog.setAttribute('data-remote-path', ctxTarget.path);
 
     const safeName = ctxTarget.name.replace(/[^a-zA-Z0-9._-]/g, '_');
-    const tempPath = await App.DownloadToTemp(ctxTarget.path, safeName);
+    const tab = getActiveTab();
+    if (!tab) return;
+    const tempPath = await App.DownloadToTemp(tab.id, ctxTarget.path, safeName);
     const stats = await App.GetFileStats(tempPath);
     const base64Data = await App.ReadFileAsBase64(tempPath);
 
@@ -1130,11 +1457,12 @@ async function savePreviewAs() {
   const dialog = document.getElementById('dialog-preview');
   const filename = dialog.getAttribute('data-filename') || 'download';
   const remotePath = dialog.getAttribute('data-remote-path');
-  if (!remotePath) return;
+  const tab = getActiveTab();
+  if (!remotePath || !tab) return;
   try {
     const dest = await App.ShowSaveDialog(filename);
     if (dest) {
-      await App.DownloadFile(remotePath, dest);
+      await App.DownloadFile(tab.id, remotePath, dest);
       showToast(`Saved to:\n${dest}`, 'success');
     }
   } catch (err) {
