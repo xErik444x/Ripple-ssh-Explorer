@@ -9,17 +9,13 @@ import (
 	"path/filepath"
 )
 
-// ListDirectory returns a JSON array of FileEntry for the given remote path.
-func (a *App) ListDirectory(path string) (string, error) {
-	a.log(fmt.Sprintf("ListDirectory: %s", path))
-	a.mu.Lock()
-	client := a.sftpClient
-	a.mu.Unlock()
-
-	if client == nil {
-		a.log("ListDirectory: SFTP not connected")
+func (a *App) ListDirectory(tabId, path string) (string, error) {
+	a.log(fmt.Sprintf("ListDirectory: %s (tab: %s)", path, tabId))
+	tab := a.getTab(tabId)
+	if tab == nil || tab.SFTPClient == nil {
 		return "[]", fmt.Errorf("SFTP not connected")
 	}
+	client := tab.SFTPClient
 
 	if path == "" {
 		path = "."
@@ -52,15 +48,12 @@ func (a *App) ListDirectory(path string) (string, error) {
 	return string(result), nil
 }
 
-// DownloadFile streams a remote file to a local path with progress events.
-func (a *App) DownloadFile(remotePath, localPath string) error {
-	a.mu.Lock()
-	client := a.sftpClient
-	a.mu.Unlock()
-
-	if client == nil {
+func (a *App) DownloadFile(tabId, remotePath, localPath string) error {
+	tab := a.getTab(tabId)
+	if tab == nil || tab.SFTPClient == nil {
 		return fmt.Errorf("SFTP not connected")
 	}
+	client := tab.SFTPClient
 
 	if err := os.MkdirAll(filepath.Dir(localPath), 0700); err != nil {
 		return fmt.Errorf("mkdir %s: %w", filepath.Dir(localPath), err)
@@ -106,6 +99,7 @@ func (a *App) DownloadFile(remotePath, localPath string) error {
 				percent = int((transferred * 100) / totalSize)
 			}
 			a.app.Event.Emit("sftp.progress", map[string]interface{}{
+				"tabId":       tabId,
 				"action":      "download",
 				"transferred": transferred,
 				"total":       totalSize,
@@ -123,15 +117,12 @@ func (a *App) DownloadFile(remotePath, localPath string) error {
 	return nil
 }
 
-// UploadFile streams a local file to a remote path with progress events.
-func (a *App) UploadFile(localPath, remotePath string) error {
-	a.mu.Lock()
-	client := a.sftpClient
-	a.mu.Unlock()
-
-	if client == nil {
+func (a *App) UploadFile(tabId, localPath, remotePath string) error {
+	tab := a.getTab(tabId)
+	if tab == nil || tab.SFTPClient == nil {
 		return fmt.Errorf("SFTP not connected")
 	}
+	client := tab.SFTPClient
 
 	localFile, err := os.Open(localPath)
 	if err != nil {
@@ -173,6 +164,7 @@ func (a *App) UploadFile(localPath, remotePath string) error {
 				percent = int((transferred * 100) / totalSize)
 			}
 			a.app.Event.Emit("sftp.progress", map[string]interface{}{
+				"tabId":       tabId,
 				"action":      "upload",
 				"transferred": transferred,
 				"total":       totalSize,
@@ -190,15 +182,12 @@ func (a *App) UploadFile(localPath, remotePath string) error {
 	return nil
 }
 
-// DeleteFile removes a remote file or directory.
-func (a *App) DeleteFile(path string, isDir bool) error {
-	a.mu.Lock()
-	client := a.sftpClient
-	a.mu.Unlock()
-
-	if client == nil {
+func (a *App) DeleteFile(tabId, path string, isDir bool) error {
+	tab := a.getTab(tabId)
+	if tab == nil || tab.SFTPClient == nil {
 		return fmt.Errorf("SFTP not connected")
 	}
+	client := tab.SFTPClient
 
 	if isDir {
 		return client.RemoveDirectory(path)
@@ -206,41 +195,32 @@ func (a *App) DeleteFile(path string, isDir bool) error {
 	return client.Remove(path)
 }
 
-// RenameFile moves or renames a remote file.
-func (a *App) RenameFile(src, dest string) error {
-	a.mu.Lock()
-	client := a.sftpClient
-	a.mu.Unlock()
-
-	if client == nil {
+func (a *App) RenameFile(tabId, src, dest string) error {
+	tab := a.getTab(tabId)
+	if tab == nil || tab.SFTPClient == nil {
 		return fmt.Errorf("SFTP not connected")
 	}
+	client := tab.SFTPClient
 
 	return client.Rename(src, dest)
 }
 
-// Mkdir creates a remote directory.
-func (a *App) Mkdir(path string) error {
-	a.mu.Lock()
-	client := a.sftpClient
-	a.mu.Unlock()
-
-	if client == nil {
+func (a *App) Mkdir(tabId, path string) error {
+	tab := a.getTab(tabId)
+	if tab == nil || tab.SFTPClient == nil {
 		return fmt.Errorf("SFTP not connected")
 	}
+	client := tab.SFTPClient
 
 	return client.Mkdir(path)
 }
 
-// DownloadToTemp downloads a remote file to a temp directory for preview.
-func (a *App) DownloadToTemp(remotePath, safeName string) (string, error) {
-	a.mu.Lock()
-	client := a.sftpClient
-	a.mu.Unlock()
-
-	if client == nil {
+func (a *App) DownloadToTemp(tabId, remotePath, safeName string) (string, error) {
+	tab := a.getTab(tabId)
+	if tab == nil || tab.SFTPClient == nil {
 		return "", fmt.Errorf("SFTP not connected")
 	}
+	client := tab.SFTPClient
 
 	tmpDir := os.TempDir()
 	localPath := filepath.Join(tmpDir, "ripple_preview_"+safeName)
