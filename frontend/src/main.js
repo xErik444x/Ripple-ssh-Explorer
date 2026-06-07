@@ -94,8 +94,7 @@ async function createNewTab(existingTabId) {
     terminal: null,
     fitAddon: null,
     currentPath: '.',
-    resizeObserver: null
-  };
+  }; 
 
   tabs.set(tabId, tab);
   tabOrder.push(tabId);
@@ -312,10 +311,6 @@ function updateHeaderStatus(tab) {
 }
 
 function disposeTerminal(tab) {
-  if (tab.resizeObserver) {
-    tab.resizeObserver.disconnect();
-    tab.resizeObserver = null;
-  }
   if (tab.fitAddon) {
     tab.fitAddon = null;
   }
@@ -327,6 +322,29 @@ function disposeTerminal(tab) {
   if (tv) tv.remove();
   tab.type = 'form';
   tab.status = 'disconnected';
+}
+
+let _panelObserver = null;
+
+function fitActiveTerminal() {
+  const tab = getActiveTab();
+  if (!tab || !tab.fitAddon || !tab.fitAddon.fit) return;
+  try {
+    tab.fitAddon.fit();
+    if (tab.terminal) {
+      App.ResizeTerminal(tab.id, tab.terminal.cols, tab.terminal.rows).catch(() => {});
+    }
+  } catch (e) {
+    console.warn('[Ripple] fit error:', e);
+  }
+}
+
+function setupTerminalResizeObserver() {
+  if (_panelObserver) _panelObserver.disconnect();
+  const panel = document.getElementById('terminal-panel');
+  if (!panel) return;
+  _panelObserver = new ResizeObserver(fitActiveTerminal);
+  _panelObserver.observe(panel);
 }
 
 function initTerminalForTab(tabId) {
@@ -364,18 +382,6 @@ function initTerminalForTab(tabId) {
         App.WriteTerminal(tabId, data).catch(err => console.warn('[Ripple] WriteTerminal:', err));
       }
     });
-
-    if (tab.resizeObserver) tab.resizeObserver.disconnect();
-    tab.resizeObserver = new ResizeObserver(() => {
-      requestAnimationFrame(() => {
-        if (!tab.fitAddon || !tab.fitAddon.fit) return;
-        tab.fitAddon.fit();
-        if (tab.terminal) {
-          App.ResizeTerminal(tabId, tab.terminal.cols, tab.terminal.rows).catch(() => {});
-        }
-      });
-    });
-    tab.resizeObserver.observe(view);
 
     view.addEventListener('contextmenu', (e) => {
       e.preventDefault();
@@ -769,6 +775,8 @@ function setupEventListeners() {
     }
   });
 
+  window.addEventListener('resize', fitActiveTerminal);
+  setupTerminalResizeObserver();
   setupSettingsDialog();
   setupEventListeners_backend();
 }
