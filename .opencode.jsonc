@@ -1,0 +1,9 @@
+{
+  "skills": [
+    {
+      "name": "git-guard",
+      "path": ".opencode/skills/git-guard/SKILL.md",
+      "autoLoad": true
+    }
+  ]
+}

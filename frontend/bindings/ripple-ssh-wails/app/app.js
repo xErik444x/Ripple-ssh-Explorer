@@ -7,6 +7,54 @@
 import { Call as $Call, CancellablePromise as $CancellablePromise, Create as $Create } from "@wailsio/runtime";
 
 /**
+ * @param {string} message
+ * @param {string} historyJSON
+ * @returns {$CancellablePromise<void>}
+ */
+export function AIChat(message, historyJSON) {
+    return $Call.ByID(1617286736, message, historyJSON);
+}
+
+/**
+ * @returns {$CancellablePromise<string>}
+ */
+export function AILoadChats() {
+    return $Call.ByID(2449994169);
+}
+
+/**
+ * @returns {$CancellablePromise<string>}
+ */
+export function AILoadConfig() {
+    return $Call.ByID(2785748344);
+}
+
+/**
+ * @param {string} chatsJSON
+ * @returns {$CancellablePromise<void>}
+ */
+export function AISaveChats(chatsJSON) {
+    return $Call.ByID(2246151730, chatsJSON);
+}
+
+/**
+ * @param {string} configJSON
+ * @returns {$CancellablePromise<void>}
+ */
+export function AISaveConfig(configJSON) {
+    return $Call.ByID(416716953, configJSON);
+}
+
+/**
+ * @param {string} endpoint
+ * @param {string} apiKey
+ * @returns {$CancellablePromise<string>}
+ */
+export function AITestConnection(endpoint, apiKey) {
+    return $Call.ByID(3215999378, endpoint, apiKey);
+}
+
+/**
  * @param {string} tabId
  * @returns {$CancellablePromise<void>}
  */
