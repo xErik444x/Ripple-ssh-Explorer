@@ -88,6 +88,71 @@
         </div>
       </div>
 
+      <div class="sidebar-pane hidden" id="ai-pane">
+        <div class="section-title">
+          <span>AI Assistant</span>
+          <span class="ai-status-badge" id="ai-status-badge">off</span>
+        </div>
+
+        <div id="ai-config">
+          <div class="ai-setup-info">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+            <p class="ai-setup-text">Connect to any OpenAI-compatible API (OpenAI, OpenRouter, Ollama, OpenCode, etc.)</p>
+          </div>
+          <div class="ai-form-group">
+            <label for="ai-endpoint">API Endpoint</label>
+            <input type="text" id="ai-endpoint" placeholder="http://localhost:11434/v1" value="http://localhost:11434/v1">
+          </div>
+          <div class="ai-form-group">
+            <label for="ai-apikey">API Key <span class="ai-label-muted">(leave blank for local)</span></label>
+            <div class="ai-apikey-row">
+              <input type="password" id="ai-apikey" placeholder="sk-...">
+              <button id="btn-ai-toggle-key" class="btn-icon-sm" title="Show/Hide">👁</button>
+            </div>
+          </div>
+          <div class="ai-form-group">
+            <div class="ai-test-row">
+              <button id="btn-ai-test" class="btn btn-secondary btn-sm" style="flex:1">Test Connection</button>
+              <span id="ai-test-status" class="ai-test-status"></span>
+            </div>
+          </div>
+          <div class="ai-form-group hidden" id="ai-model-group">
+            <label for="ai-model-filter">Model</label>
+            <input type="text" id="ai-model-filter" placeholder="Search models..." class="hidden">
+            <select id="ai-model" size="6"></select>
+          </div>
+          <div id="ai-config-actions" class="hidden">
+            <button id="btn-ai-save-config" class="btn btn-primary btn-sm" style="width:100%">Save &amp; Start Chat</button>
+          </div>
+        </div>
+
+        <div id="ai-chat" class="hidden">
+          <div class="ai-chat-top">
+            <div class="ai-chat-model-dropdown" id="ai-chat-model-dd">
+              <button class="ai-chat-model-btn" id="ai-chat-model-btn" title="Switch model">model</button>
+              <div class="ai-chat-model-panel hidden" id="ai-chat-model-panel">
+                <input type="text" id="ai-chat-model-filter" placeholder="Search model...">
+                <div class="ai-chat-model-list" id="ai-chat-model-list"></div>
+              </div>
+            </div>
+            <button id="btn-ai-new-chat" class="btn-icon-sm" title="New Chat">＋</button>
+            <button id="btn-ai-chat-settings" class="btn-icon-sm" title="Config">⚙</button>
+          </div>
+          <div class="ai-conv-tabs" id="ai-conv-tabs"></div>
+          <div id="ai-chat-messages">
+            <div class="ai-welcome" id="ai-welcome-msg">
+              <p>Assistant ready. Ask about SSH commands, errors, or anything else.</p>
+            </div>
+          </div>
+          <div id="ai-chat-input">
+            <textarea id="ai-input" rows="2" placeholder="Ask about commands, errors, configs..."></textarea>
+            <button id="btn-ai-send" class="btn btn-primary btn-sm" disabled>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+            </button>
+          </div>
+        </div>
+      </div>
+
     </aside>
 
     <main class="main-content">
@@ -105,6 +170,10 @@
           <button id="btn-settings" class="btn btn-secondary hidden" title="Terminal Settings" aria-label="Terminal Settings">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
             Settings
+          </button>
+          <button id="btn-ai-toggle" class="btn btn-secondary hidden" title="AI Assistant">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a4 4 0 0 1 4 4c0 2-2 3-2 3h-4s-2-1-2-3a4 4 0 0 1 4-4z"/><path d="M6 14c0-1.5 2-2 2-2h8s2 .5 2 2c0 2-2 5-2 5H8s-2-3-2-5z"/><path d="M12 20v2"/></svg>
+            AI
           </button>
         </div>
       </header>
@@ -312,6 +381,10 @@
       <li id="ctx-term-paste" role="menuitem">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path><rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect></svg>
         <span>Paste</span>
+      </li>
+      <li id="ctx-term-explain" role="menuitem">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a4 4 0 0 1 4 4c0 2-2 3-2 3h-4s-2-1-2-3a4 4 0 0 1 4-4z"/><path d="M6 14c0-1.5 2-2 2-2h8s2 .5 2 2c0 2-2 5-2 5H8s-2-3-2-5z"/><path d="M12 20v2"/></svg>
+        <span>Explain with AI</span>
       </li>
     </ul>
   </div>
