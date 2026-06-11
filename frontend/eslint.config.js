@@ -10,6 +10,7 @@ export default [
         console: 'readonly',
         navigator: 'readonly',
         setTimeout: 'readonly',
+        clearTimeout: 'readonly',
         requestAnimationFrame: 'readonly',
         ResizeObserver: 'readonly',
         URL: 'readonly',

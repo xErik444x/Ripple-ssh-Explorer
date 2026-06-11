@@ -185,7 +185,7 @@
       <section class="panel-form" id="config-panel">
         <div class="form-container">
           <h1 class="form-title" id="form-heading">Establish Connection</h1>
-          <p class="form-subtitle">Enter details to initiate remote SSH & SFTP session</p>
+          <p class="form-subtitle">Enter details to initiate remote session</p>
           
           <form id="ssh-form">
             <input type="hidden" id="profile-id">
@@ -199,6 +199,25 @@
                 <label for="ssh-port">Port</label>
                 <input type="number" id="ssh-port" value="22" placeholder="22" min="1" max="65535" required>
               </div>
+            </div>
+
+            <div class="form-group-row" id="connection-type-row">
+              <div class="form-group flex-1">
+                <label for="connection-type">Connection Type</label>
+                <select id="connection-type">
+                  <option value="terminal">Terminal SSH</option>
+                  <option value="vnc">Remote Desktop (VNC)</option>
+                </select>
+              </div>
+              <div class="form-group flex-1 hidden" id="vnc-port-group">
+                <label for="vnc-port">VNC Port</label>
+                <input type="number" id="vnc-port" value="5900" placeholder="5900" min="1" max="65535">
+              </div>
+            </div>
+
+            <div class="form-group hidden" id="vnc-password-group">
+              <label for="vnc-password">VNC Password <span class="form-label-muted">(optional)</span></label>
+              <input type="password" id="vnc-password" placeholder="VNC server password" autocomplete="off">
             </div>
 
             <div class="form-group">
@@ -257,6 +276,32 @@
 
       <section class="panel-terminal hidden" id="terminal-panel">
         <div id="terminal-views"></div>
+      </section>
+
+      <section class="panel-vnc hidden" id="vnc-panel">
+        <div class="vnc-toolbar">
+          <div class="vnc-toolbar-left">
+            <span class="vnc-status" id="vnc-status">Connecting...</span>
+          </div>
+          <div class="vnc-toolbar-right">
+            <button id="vnc-btn-ctrl-alt-del" class="btn btn-icon-sm" title="Send Ctrl+Alt+Del">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>
+              Ctrl+Alt+Del
+            </button>
+            <button id="vnc-btn-fullscreen" class="btn btn-icon-sm" title="Toggle Fullscreen">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
+            </button>
+          </div>
+        </div>
+        <div class="vnc-canvas-wrapper">
+          <canvas id="vnc-canvas"></canvas>
+          <div class="vnc-overlay hidden" id="vnc-overlay">
+            <div class="vnc-overlay-content">
+              <div class="vnc-spinner"></div>
+              <p id="vnc-overlay-text">Connecting to remote desktop...</p>
+            </div>
+          </div>
+        </div>
       </section>
 
     </main>
@@ -352,8 +397,8 @@
         <input type="range" id="settings-font-size" min="10" max="24" value="14" step="1">
       </div>
       <div class="form-group">
-        <label for="settings-line-height">Line Height: <span id="settings-line-height-val">1.5</span></label>
-        <input type="range" id="settings-line-height" min="1.0" max="2.0" value="1.5" step="0.1">
+        <label for="settings-line-height">Line Height: <span id="settings-line-height-val">1.2</span></label>
+        <input type="range" id="settings-line-height" min="1.0" max="2.0" value="1.2" step="0.1">
       </div>
       <div class="form-group">
         <label for="settings-font-family">Font Family</label>
@@ -414,6 +459,7 @@
   <script type="module" src="./wailsjs/runtime/runtime.js"></script>
   <script src="/xterm.js"></script>
   <script src="/xterm-addon-fit.js"></script>
+  <script type="module" src="/novnc-loader.js"></script>
   <script type="module" src="./src/main.js"></script>
 </body>
 </html>

@@ -18,15 +18,22 @@ type connectionState struct {
 	Host            string
 	Username        string
 	Port            string
+	ConnectionType  string
+	VncPort         int
+	PendingCols     int
+	PendingRows     int
 	SSHClient       *ssh.Client
 	SFTPClient      *sftp.Client
 	TerminalSession *terminalSession
+	VNCProxy        *vncProxy
 }
 
 type terminalSession struct {
-	stdin  io.WriteCloser
-	stdout io.Reader
-	done   chan struct{}
+	stdin   io.WriteCloser
+	stdout  io.Reader
+	stderr  io.Reader
+	session *ssh.Session
+	done    chan struct{}
 }
 
 type FileEntry struct {
@@ -115,6 +122,10 @@ func (a *App) CloseTab(tabId string) {
 }
 
 func (a *App) disconnectTabLocked(tab *connectionState) {
+	if tab.VNCProxy != nil {
+		tab.VNCProxy.stop()
+		tab.VNCProxy = nil
+	}
 	if tab.SFTPClient != nil {
 		_ = tab.SFTPClient.Close()
 		tab.SFTPClient = nil

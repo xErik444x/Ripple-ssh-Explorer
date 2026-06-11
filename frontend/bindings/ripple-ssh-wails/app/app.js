@@ -70,10 +70,12 @@ export function CloseTab(tabId) {
  * @param {string} password
  * @param {string} privateKeyText
  * @param {string} passphrase
+ * @param {string} connectionType
+ * @param {number} vncPort
  * @returns {$CancellablePromise<void>}
  */
-export function ConnectSSH(tabId, host, port, username, password, privateKeyText, passphrase) {
-    return $Call.ByID(2974803588, tabId, host, port, username, password, privateKeyText, passphrase);
+export function ConnectSSH(tabId, host, port, username, password, privateKeyText, passphrase, connectionType, vncPort) {
+    return $Call.ByID(2974803588, tabId, host, port, username, password, privateKeyText, passphrase, connectionType, vncPort);
 }
 
 /**
@@ -273,6 +275,22 @@ export function ShowOpenDialog() {
  */
 export function ShowSaveDialog(defaultName) {
     return $Call.ByID(3437106732, defaultName);
+}
+
+/**
+ * @param {string} tabId
+ * @returns {$CancellablePromise<void>}
+ */
+export function StartVNCProxy(tabId) {
+    return $Call.ByID(4012334815, tabId);
+}
+
+/**
+ * @param {string} tabId
+ * @returns {$CancellablePromise<void>}
+ */
+export function StopVNCProxy(tabId) {
+    return $Call.ByID(3192473875, tabId);
 }
 
 /**

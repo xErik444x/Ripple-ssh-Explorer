@@ -239,6 +239,7 @@ func (a *App) AIChat(message, historyJSON string) {
 		return
 	}
 
+	lineBuf := &strings.Builder{}
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 0, 1024*1024), 1024*1024)
 	for scanner.Scan() {
@@ -256,9 +257,11 @@ func (a *App) AIChat(message, historyJSON string) {
 		}
 		for _, ch := range sr.Choices {
 			if ch.Delta.Content != "" {
+				lineBuf.WriteString(ch.Delta.Content)
 				a.app.Event.Emit("ai.chunk", map[string]string{"text": ch.Delta.Content})
 			}
 		}
 	}
+	a.emitLog("Full AI response: " + lineBuf.String())
 	a.app.Event.Emit("ai.done", map[string]string{})
 }

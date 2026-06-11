@@ -2,6 +2,20 @@ import * as App from '../bindings/ripple-ssh-wails/app/app';
 import { tabs, getActiveTab } from './state.js';
 
 let _panelObserver = null;
+let _resizeTimer = null;
+
+function debouncedResize(tab) {
+  if (!tab || !tab.fitAddon || !tab.fitAddon.fit || !tab.terminal) return;
+  clearTimeout(_resizeTimer);
+  _resizeTimer = setTimeout(() => {
+    try {
+      tab.fitAddon.fit();
+      App.ResizeTerminal(tab.id, tab.terminal.cols, tab.terminal.rows).catch(() => {});
+    } catch (e) {
+      console.warn('[Ripple] fit error:', e);
+    }
+  }, 100);
+}
 
 export function fitActiveTerminal() {
   const tab = getActiveTab();
@@ -20,7 +34,10 @@ export function setupTerminalResizeObserver() {
   if (_panelObserver) _panelObserver.disconnect();
   const panel = document.getElementById('terminal-panel');
   if (!panel) return;
-  _panelObserver = new ResizeObserver(fitActiveTerminal);
+  _panelObserver = new ResizeObserver(() => {
+    const tab = getActiveTab();
+    debouncedResize(tab);
+  });
   _panelObserver.observe(panel);
 }
 
@@ -50,15 +67,24 @@ export function initTerminalForTab(tabId) {
     const term = new Terminal({
       cursorBlink: true,
       fontSize: tab.fontSize || 14,
-      lineHeight: tab.lineHeight || 1.5,
-      fontFamily: `"${tab.fontFamily || 'Fira Code'}", var(--font-mono)`
+      lineHeight: tab.lineHeight || 1.2,
+      fontFamily: `"${tab.fontFamily || 'Fira Code'}", var(--font-mono)`,
+      letterSpacing: 0,
+      allowTransparency: false,
+      cursorStyle: 'block',
+      scrollback: 10000,
     });
     term.open(view);
     tab.terminal = term;
     tab.fitAddon = typeof FitAddon.FitAddon !== 'undefined' ? new FitAddon.FitAddon() : new FitAddon();
     if (tab.fitAddon.fit) {
       term.loadAddon(tab.fitAddon);
-      requestAnimationFrame(() => tab.fitAddon.fit());
+      requestAnimationFrame(() => {
+        tab.fitAddon.fit();
+        if (tab.terminal) {
+          App.ResizeTerminal(tabId, tab.terminal.cols, tab.terminal.rows).catch(() => {});
+        }
+      });
     }
 
     term.onData((data) => {
@@ -69,14 +95,16 @@ export function initTerminalForTab(tabId) {
     });
 
     if (tab.resizeObserver) tab.resizeObserver.disconnect();
+    let tabResizeTimer = null;
     tab.resizeObserver = new ResizeObserver(() => {
-      requestAnimationFrame(() => {
+      clearTimeout(tabResizeTimer);
+      tabResizeTimer = setTimeout(() => {
         if (!tab.fitAddon || !tab.fitAddon.fit) return;
         tab.fitAddon.fit();
         if (tab.terminal) {
           App.ResizeTerminal(tabId, tab.terminal.cols, tab.terminal.rows).catch(() => {});
         }
-      });
+      }, 100);
     });
     tab.resizeObserver.observe(view);
 
