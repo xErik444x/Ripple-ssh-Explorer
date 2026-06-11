@@ -14,8 +14,12 @@ export const _closingTabIds = new Set();
 
 export const terminalSettings = {
   fontSize: 14,
-  lineHeight: 1.5,
+  lineHeight: 1.2,
   fontFamily: 'Fira Code'
+};
+
+export const vncSettings = {
+  port: 5900,
 };
 
 export let ctxTarget = null;

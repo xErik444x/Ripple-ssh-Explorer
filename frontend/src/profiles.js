@@ -32,9 +32,10 @@ export function renderProfiles() {
   profiles.forEach(p => {
     const item = document.createElement('div');
     item.className = 'profile-item';
+    const connType = p.credentials.connectionType === 'vnc' ? '🖥 VNC' : '🔌 SSH';
     item.innerHTML = `
       <div class="profile-info">
-        <span class="profile-name">${escapeHtml(p.name)}</span>
+        <span class="profile-name">${escapeHtml(p.name)} <span class="profile-type-badge">${connType}</span></span>
         <span class="profile-host">${escapeHtml(p.credentials.username)}@${escapeHtml(p.credentials.host)}:${escapeHtml(p.credentials.port)}</span>
       </div>
       <div class="profile-item-actions">
@@ -67,8 +68,16 @@ export function loadProfileIntoForm(p) {
   document.getElementById('profile-id').value = p.id;
   document.getElementById('profile-name').value = p.name;
   tab.host = p.credentials.host; tab.port = p.credentials.port; tab.username = p.credentials.username;
+  tab.connectionType = p.credentials.connectionType || 'terminal';
+  tab.vncPort = p.credentials.vncPort || 5900;
+  tab.vncPassword = p.credentials.vncPassword || '';
   document.getElementById('ssh-host').value = p.credentials.host;
   document.getElementById('ssh-port').value = p.credentials.port;
+  document.getElementById('connection-type').value = tab.connectionType;
+  document.getElementById('vnc-port').value = tab.vncPort;
+  document.getElementById('vnc-password').value = tab.vncPassword;
+  document.getElementById('vnc-port-group').classList.toggle('hidden', tab.connectionType !== 'vnc');
+  document.getElementById('vnc-password-group').classList.toggle('hidden', tab.connectionType !== 'vnc');
   document.getElementById('ssh-username').value = p.credentials.username;
   const authBtnPwd = document.getElementById('auth-btn-pwd');
   const authBtnKey = document.getElementById('auth-btn-key');

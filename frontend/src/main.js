@@ -14,6 +14,7 @@ import { initTerminalForTab, disposeTerminal, fitActiveTerminal, setupTerminalRe
 import { explainWithAI, setupAIEventListeners, setupAIUIListeners, loadChats } from './ai.js';
 import { loadDirectory, triggerDownload, openRenameDialog, triggerDelete, triggerUpload, showTransferStatus } from './sftp.js';
 import { triggerPreview, updatePreviewProgress, savePreviewAs, openPreviewWithExternalApp, cleanupPreviewResources } from './preview.js';
+import { connectVNC, disconnectVNC, sendCtrlAltDel, toggleFullscreen, setStatusCallback } from './vnc.js';
 
 // ── Window ─────────────────────────────────────────────────────────────────────
 
@@ -37,6 +38,20 @@ async function initApp() {
   await loadProfiles();
   await createNewTab();
   loadChats();
+  setStatusCallback((text, type) => {
+    const tab = getActiveTab();
+    if (tab && tab.type === 'vnc') {
+      if (type === 'connected') {
+        tab.status = 'connected';
+        updateHeaderStatus(tab);
+        renderTabBar();
+      } else if (type === 'error' || type === 'disconnected') {
+        tab.status = 'disconnected';
+        updateHeaderStatus(tab);
+        renderTabBar();
+      }
+    }
+  });
 }
 
 // ── Tab Management ─────────────────────────────────────────────────────────────
@@ -48,6 +63,7 @@ async function createNewTab(existingTabId) {
     id: tabId, type: 'form', status: 'disconnected', label: 'New Connection',
     host: '', port: '22', username: '', authType: 'password', password: '',
     privateKeyText: '', passphrase: '', privateKeyPath: '',
+    connectionType: 'terminal', vncPort: 5900, vncPassword: '',
     terminal: null, fitAddon: null, currentPath: '.'
   };
   tabs.set(tabId, tab);
@@ -88,11 +104,13 @@ function switchToTab(tabId) {
   const tabEl = document.querySelector(`.tab-item[data-tab-id="${tabId}"]`);
   if (tabEl) tabEl.classList.add('active');
   document.querySelectorAll('.terminal-view').forEach(el => el.classList.remove('active'));
+  const vncPanel = document.getElementById('vnc-panel');
   const profilesPane = document.getElementById('profiles-pane');
   const sftpPane = document.getElementById('sftp-pane');
   if (newTab.type === 'terminal') {
     configPanel.classList.add('hidden');
     terminalPanel.classList.remove('hidden');
+    if (vncPanel) vncPanel.classList.add('hidden');
     profilesPane.classList.add('hidden');
     sftpPane.classList.remove('hidden');
     const tv = document.querySelector(`.terminal-view[data-tab-id="${tabId}"]`);
@@ -107,8 +125,18 @@ function switchToTab(tabId) {
     }
     updateHeaderStatus(newTab);
     loadDirectory(tabId, newTab.currentPath);
+  } else if (newTab.type === 'vnc') {
+    configPanel.classList.add('hidden');
+    terminalPanel.classList.add('hidden');
+    if (vncPanel) vncPanel.classList.remove('hidden');
+    profilesPane.classList.add('hidden');
+    sftpPane.classList.add('hidden');
+    updateHeaderStatus(newTab);
+    document.getElementById('btn-disconnect').classList.remove('hidden');
+    document.getElementById('btn-settings').classList.add('hidden');
   } else {
     terminalPanel.classList.add('hidden');
+    if (vncPanel) vncPanel.classList.add('hidden');
     configPanel.classList.remove('hidden');
     profilesPane.classList.remove('hidden');
     sftpPane.classList.add('hidden');
@@ -135,6 +163,9 @@ function updateHeaderStatus(tab) {
 function saveFormToTab(tab) {
   tab.host = document.getElementById('ssh-host').value.trim();
   tab.port = document.getElementById('ssh-port').value.trim() || '22';
+  tab.connectionType = document.getElementById('connection-type').value;
+  tab.vncPort = parseInt(document.getElementById('vnc-port').value, 10) || 5900;
+  tab.vncPassword = document.getElementById('vnc-password').value;
   tab.username = document.getElementById('ssh-username').value.trim();
   const authBtn = document.querySelector('.auth-btn.active');
   tab.authType = authBtn ? authBtn.getAttribute('data-target') : 'password';
@@ -147,6 +178,10 @@ function saveFormToTab(tab) {
 function loadFormFromTab(tab) {
   document.getElementById('ssh-host').value = tab.host;
   document.getElementById('ssh-port').value = tab.port;
+  document.getElementById('connection-type').value = tab.connectionType || 'terminal';
+  document.getElementById('vnc-port').value = tab.vncPort || 5900;
+  document.getElementById('vnc-password').value = tab.vncPassword || '';
+  toggleVncFields(tab.connectionType === 'vnc');
   document.getElementById('ssh-username').value = tab.username;
   const authBtnPwd = document.getElementById('auth-btn-pwd');
   const authBtnKey = document.getElementById('auth-btn-key');
@@ -159,6 +194,11 @@ function loadFormFromTab(tab) {
     document.getElementById('ssh-key-text').value = tab.privateKeyText;
     document.getElementById('ssh-passphrase').value = tab.passphrase;
   }
+}
+
+function toggleVncFields(show) {
+  document.getElementById('vnc-port-group').classList.toggle('hidden', !show);
+  document.getElementById('vnc-password-group').classList.toggle('hidden', !show);
 }
 
 function renderTabBar() {
@@ -208,7 +248,7 @@ function connectSsh() {
   tab.status = 'connecting';
   renderTabBar();
   updateHeaderStatus(tab);
-  App.ConnectSSH(tab.id, tab.host, tab.port, tab.username, tab.password, tab.privateKeyText, tab.passphrase).catch(err => {
+  App.ConnectSSH(tab.id, tab.host, tab.port, tab.username, tab.password, tab.privateKeyText, tab.passphrase, tab.connectionType || 'terminal', tab.vncPort || 5900).catch(err => {
     showToast(`SSH Error: ${err}`, 'error');
     tab.status = 'disconnected';
     connectBtn.disabled = false;
@@ -231,9 +271,14 @@ async function saveProfile() {
   const username = document.getElementById('ssh-username').value.trim();
   if (!host || !username) { showToast('Please fill out Host and Username to save a profile.', 'warning'); return; }
   const authType = document.querySelector('.auth-btn.active').getAttribute('data-target');
+  const connectionType = document.getElementById('connection-type').value;
   let name = document.getElementById('profile-name').value.trim();
   if (!name) { name = `${username}@${host}:${port}`; document.getElementById('profile-name').value = name; }
-  const payload = { host, port, username };
+  const payload = { host, port, username, connectionType };
+  if (connectionType === 'vnc') {
+    payload.vncPort = parseInt(document.getElementById('vnc-port').value, 10) || 5900;
+    payload.vncPassword = document.getElementById('vnc-password').value;
+  }
   if (authType === 'password') { payload.password = document.getElementById('ssh-password').value; }
   else { payload.privateKeyPath = document.getElementById('ssh-key-path').value.trim(); payload.privateKeyText = document.getElementById('ssh-key-text').value; payload.passphrase = document.getElementById('ssh-passphrase').value; }
   await saveProfileData(name, payload, authType);
@@ -251,29 +296,46 @@ function setupEventListeners_backend() {
     tab.host = host;
     tab.username = username;
     tab.label = `${username}@${host}`;
-    tab.type = 'terminal';
-    initTerminalForTab(tabId);
-    tab.currentPath = '.';
+    tab.type = tab.connectionType === 'vnc' ? 'vnc' : 'terminal';
+    if (tab.type === 'terminal') {
+      initTerminalForTab(tabId);
+      tab.currentPath = '.';
+    }
     if (activeTabId === tabId) {
       updateHeaderStatus(tab);
       document.getElementById('btn-disconnect').classList.remove('hidden');
-      document.getElementById('btn-settings').classList.remove('hidden');
-      document.getElementById('btn-ai-toggle').classList.remove('hidden');
       const configPanel = document.getElementById('config-panel');
       const terminalPanel = document.getElementById('terminal-panel');
+      const vncPanel = document.getElementById('vnc-panel');
       configPanel.classList.add('hidden');
-      terminalPanel.classList.remove('hidden');
-      document.getElementById('profiles-pane').classList.add('hidden');
-      document.getElementById('sftp-pane').classList.remove('hidden');
-      const tv = document.querySelector(`.terminal-view[data-tab-id="${tabId}"]`);
-      if (tv) {
-        document.querySelectorAll('.terminal-view').forEach(el => el.classList.remove('active'));
-        tv.classList.add('active');
-        if (tab.fitAddon) {
-          requestAnimationFrame(() => { tab.fitAddon.fit(); tab.terminal.focus(); });
+      if (tab.type === 'vnc') {
+        terminalPanel.classList.add('hidden');
+        if (vncPanel) vncPanel.classList.remove('hidden');
+        document.getElementById('profiles-pane').classList.add('hidden');
+        document.getElementById('sftp-pane').classList.add('hidden');
+        document.getElementById('btn-settings').classList.add('hidden');
+        document.getElementById('btn-ai-toggle').classList.add('hidden');
+      } else {
+        terminalPanel.classList.remove('hidden');
+        if (vncPanel) vncPanel.classList.add('hidden');
+        document.getElementById('profiles-pane').classList.add('hidden');
+        document.getElementById('sftp-pane').classList.remove('hidden');
+        document.getElementById('btn-settings').classList.remove('hidden');
+        document.getElementById('btn-ai-toggle').classList.remove('hidden');
+        const tv = document.querySelector(`.terminal-view[data-tab-id="${tabId}"]`);
+        if (tv) {
+          document.querySelectorAll('.terminal-view').forEach(el => el.classList.remove('active'));
+          tv.classList.add('active');
+          if (tab.fitAddon) {
+            requestAnimationFrame(() => {
+              tab.fitAddon.fit();
+              tab.terminal.focus();
+              if (tab.terminal) App.ResizeTerminal(tabId, tab.terminal.cols, tab.terminal.rows).catch(() => {});
+            });
+          }
         }
+        setTimeout(() => loadDirectory(tabId, tab.currentPath), 200);
       }
-      setTimeout(() => loadDirectory(tabId, tab.currentPath), 200);
     }
     const connectBtn = document.getElementById('btn-connect');
     connectBtn.disabled = false;
@@ -297,11 +359,36 @@ function setupEventListeners_backend() {
     document.getElementById('btn-ai-toggle').classList.add('hidden');
     tab.status = 'disconnected';
     if (tab.terminal) disposeTerminal(tab);
+    if (tab.type === 'vnc') {
+      disconnectVNC();
+      tab.type = 'form';
+    }
     if (!_closingTabIds.has(tabId) && activeTabId === tabId) {
       const connectedTabs = tabOrder.filter(id => { const t = tabs.get(id); return t && t.status === 'connected'; });
       if (connectedTabs.length > 0) switchToTab(connectedTabs[0]); else switchToTab(tabId);
     }
     renderTabBar();
+  });
+
+  Events.On('vnc.started', (event) => {
+    const { tabId, wsUrl } = event.data;
+    const tab = tabs.get(tabId);
+    if (!tab) return;
+    const vncPass = tab.vncPassword || document.getElementById('vnc-password').value || '';
+    connectVNC(tabId, wsUrl, vncPass);
+  });
+
+  Events.On('vnc.error', (event) => {
+    const { tabId, message } = event.data;
+    showToast(`VNC Error: ${message}`, 'error');
+    const tab = tabs.get(tabId);
+    if (tab) {
+      tab.status = 'disconnected';
+      renderTabBar();
+      if (activeTabId === tabId) updateHeaderStatus(tab);
+    }
+    document.getElementById('btn-connect').disabled = false;
+    document.getElementById('btn-connect').innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path><polyline points="10 17 15 12 10 7"></polyline><line x1="15" y1="12" x2="3" y2="12"></line></svg> Connect Now';
   });
 
   Events.On('terminal.data', (event) => {
@@ -340,6 +427,13 @@ function setupEventListeners() {
   });
 
   document.getElementById('btn-disconnect').addEventListener('click', () => { const tab = getActiveTab(); if (tab) App.DisconnectSSH(tab.id).catch(err => console.warn('[Ripple] Disconnect:', err)); });
+
+  document.getElementById('connection-type').addEventListener('change', (e) => {
+    toggleVncFields(e.target.value === 'vnc');
+  });
+
+  document.getElementById('vnc-btn-ctrl-alt-del').addEventListener('click', sendCtrlAltDel);
+  document.getElementById('vnc-btn-fullscreen').addEventListener('click', toggleFullscreen);
 
   document.getElementById('ssh-form').addEventListener('submit', (e) => { e.preventDefault(); connectSsh(); });
   document.getElementById('btn-save-profile').addEventListener('click', saveProfile);
@@ -439,7 +533,11 @@ function setupEventListeners() {
     }
   });
 
-  window.addEventListener('resize', fitActiveTerminal);
+  let _windowResizeTimer = null;
+  window.addEventListener('resize', () => {
+    clearTimeout(_windowResizeTimer);
+    _windowResizeTimer = setTimeout(fitActiveTerminal, 100);
+  });
   setupTerminalResizeObserver();
   setupSettingsDialog();
   setupAIUIListeners();

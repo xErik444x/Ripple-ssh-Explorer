@@ -8,11 +8,11 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-func (a *App) ConnectSSH(tabId, host, port, username, password, privateKeyText, passphrase string) {
-	go a.connectSSHAsync(tabId, host, port, username, password, privateKeyText, passphrase)
+func (a *App) ConnectSSH(tabId, host, port, username, password, privateKeyText, passphrase, connectionType string, vncPort int) {
+	go a.connectSSHAsync(tabId, host, port, username, password, privateKeyText, passphrase, connectionType, vncPort)
 }
 
-func (a *App) connectSSHAsync(tabId, host, port, username, password, privateKeyText, passphrase string) {
+func (a *App) connectSSHAsync(tabId, host, port, username, password, privateKeyText, passphrase, connectionType string, vncPort int) {
 	a.log(fmt.Sprintf("Connecting to %s:%s as %s (tab: %s)", host, port, username, tabId))
 	if port == "" {
 		port = "22"
@@ -60,11 +60,33 @@ func (a *App) connectSSHAsync(tabId, host, port, username, password, privateKeyT
 		tab.Host = host
 		tab.Username = username
 		tab.Port = port
+		tab.ConnectionType = connectionType
+		tab.VncPort = vncPort
 	}
 	a.mu.Unlock()
 
 	if tab == nil {
 		_ = client.Close()
+		return
+	}
+
+	if connectionType == "vnc" {
+		a.app.Event.Emit("ssh.connected", map[string]string{
+			"tabId":    tabId,
+			"host":     host,
+			"username": username,
+		})
+
+		go func() {
+			time.Sleep(300 * time.Millisecond)
+			if err := a.StartVNCProxy(tabId); err != nil {
+				a.log(fmt.Sprintf("VNC proxy start failed: %s", err.Error()))
+				a.app.Event.Emit("vnc.error", map[string]string{
+					"tabId":   tabId,
+					"message": fmt.Sprintf("VNC proxy failed: %s", err.Error()),
+				})
+			}
+		}()
 		return
 	}
 

@@ -7,7 +7,8 @@ export const aiState = {
   conversations: [],
   activeConvId: null,
   isStreaming: false,
-  currentMsgEl: null
+  currentMsgEl: null,
+  currentRawContent: ''
 };
 
 export let _convCounter = 0;
@@ -291,6 +292,7 @@ export function sendAIChat() {
   addAIChatMessage('user', text);
   aiState.isStreaming = true;
   aiState.currentMsgEl = addAIChatMessage('assistant', '', true);
+  aiState.currentRawContent = '';
   document.getElementById('btn-ai-send').disabled = true;
 
   const systemMsg = { role: 'system', content: 'You are a concise SSH terminal assistant. Answer briefly (2-4 short sentences). Use code blocks for commands. Be direct.' };
@@ -384,9 +386,9 @@ export function setupAIEventListeners() {
   Events.On('ai.chunk', (event) => {
     const text = event.data.text || '';
     if (aiState.currentMsgEl) {
-      const existing = aiState.currentMsgEl.querySelector('div:last-child');
-      const newContent = (existing ? existing.textContent : '') + text;
-      updateAIChatMessage(aiState.currentMsgEl, newContent);
+      aiState.currentRawContent += text;
+      updateAIChatMessage(aiState.currentMsgEl, aiState.currentRawContent);
+      console.log('[AI chunk] len=' + text.length + ' text=' + JSON.stringify(text));
     }
   });
 
@@ -396,11 +398,13 @@ export function setupAIEventListeners() {
       aiState.currentMsgEl.classList.remove('streaming');
       const conv = activeConv();
       if (conv) {
-        conv.messages.push({ role: 'assistant', content: aiState.currentMsgEl.querySelector('div:last-child').textContent });
+        console.log('[AI done] raw=' + JSON.stringify(aiState.currentRawContent));
+        conv.messages.push({ role: 'assistant', content: aiState.currentRawContent });
         trimConvHistory(conv);
         saveChats();
       }
       aiState.currentMsgEl = null;
+      aiState.currentRawContent = '';
     }
     document.getElementById('btn-ai-send').disabled = false;
   });
@@ -427,6 +431,7 @@ export function setupAIEventListeners() {
           conv.messages.pop();
           aiState.isStreaming = true;
           aiState.currentMsgEl = addAIChatMessage('assistant', '', true);
+          aiState.currentRawContent = '';
           document.getElementById('btn-ai-send').disabled = true;
           const systemMsg = { role: 'system', content: 'You are a concise SSH terminal assistant. Answer briefly (2-4 short sentences). Use code blocks for commands. Be direct.' };
           const apiMessages = [systemMsg, ...conv.messages.slice(0, -1)];
@@ -439,6 +444,7 @@ export function setupAIEventListeners() {
         aiState.currentMsgEl.appendChild(retry);
       }
       aiState.currentMsgEl = null;
+      aiState.currentRawContent = '';
     }
     document.getElementById('btn-ai-send').disabled = false;
   });
